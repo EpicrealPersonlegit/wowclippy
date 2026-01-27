@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WowClippy Sync</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        textarea { width: 95%; height: 300px; background: #1e1e1e; color: #9cdcfe; border: 1px solid #333; padding: 12px; font-family: 'Consolas', monospace; border-radius: 4px; outline: none; }
+        textarea:focus { border-color: #0078d4; }
+        button { margin-top: 15px; padding: 12px 30px; cursor: pointer; background: #0078d4; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #0086f1; }
+        button:disabled { background: #444; cursor: not-allowed; }
+        #status { margin-top: 15px; font-weight: bold; }
+        #log { margin-top: 10px; font-size: 12px; color: #888; background: #000; padding: 5px; width: 95%; border-radius: 4px; display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>🚀 WowClippy Web Sync</h2>
+    <textarea id="box" placeholder="Paste your Roblox code here..."></textarea>
+    <button id="btn" onclick="pushToGithub()">Push to Roblox</button>
+    <div id="status">Ready</div>
+    <div id="log"></div>
+
+    <script>
+        const TOKEN = "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";
+        const REPO = "EpicrealPersonlegit/wowclippy";
+        const FILE = "data/clipboard.txt"; // Updated path
+        const URL = `https://api.github.com/repos/${REPO}/contents/${FILE}`;
+
+        function updateLog(msg) {
+            const log = document.getElementById('log');
+            log.style.display = "block";
+            log.innerText = "Internal Log: " + msg;
+        }
+
+        async function pushToGithub() {
+            const btn = document.getElementById('btn');
+            const status = document.getElementById('status');
+            const content = document.getElementById('box').value;
+            
+            btn.disabled = true;
+            status.innerText = "⏳ Syncing...";
+            status.style.color = "#0078d4";
+
+            try {
+                // 1. Get SHA
+                const getRes = await fetch(URL, {
+                    headers: { "Authorization": `token ${TOKEN}` }
+                });
+
+                if (!getRes.ok) {
+                    throw new Error(`GET Failed: ${getRes.status} - Check if "data" folder and "clipboard.txt" exist!`);
+                }
+
+                const getData = await getRes.json();
+                const sha = getData.sha;
+
+                // 2. Encode to Base64 safely
+                const encodedContent = btoa(unescape(encodeURIComponent(content)));
+
+                // 3. Update File
+                const putRes = await fetch(URL, {
+                    method: "PUT",
+                    headers: {
+                        "Authorization": `token ${TOKEN}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message: "Update via WowClippy",
+                        content: encodedContent,
+                        sha: sha
+                    })
+                });
+
+                if (putRes.ok) {
+                    status.innerText = "✅ Sent to GitHub!";
+                    status.style.color = "#4ec9b0";
+                } else {
+                    const errData = await putRes.json();
+                    throw new Error(`GitHub API: ${errData.message}`);
+                }
+            } catch (err) {
+                status.innerText = "❌ Error Occurred";
+                status.style.color = "#f44747";
+                updateLog(err.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
