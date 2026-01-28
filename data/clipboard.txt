@@ -1,3 +1,63 @@
- 20:03:37.699  Stack Begin  -  Studio
-  20:03:37.700  Script 'Players.fijisumm.PlayerGui.Avatar.CatalogLocalLogic', Line 12  -  Studio - CatalogLocalLogic:12
-  20:03:37.700  Stack End  -  Studio
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+local MarketplaceService = game:GetService("MarketplaceService")
+
+-- Map AssetType IDs to HumanoidDescription Properties
+local ASSET_MAP = {
+	[8] = "Hat", [11] = "Shirt", [12] = "Pants", [18] = "Face",
+	[27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
+	[41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
+	[44] = "ShoulderAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
+	[61] = "Emote", [64] = "JacketAccessory", [65] = "SweaterAccessory", [66] = "ShortsAccessory",
+	[67] = "LeftShoeAccessory", [68] = "RightShoeAccessory", [69] = "DressSkirtAccessory"
+}
+
+EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local description = humanoid:GetAppliedDescription()
+
+	if action == "Equip" then
+		local success, info = pcall(function() return MarketplaceService:GetProductInfo(assetId) end)
+		if not success or not info then return end
+
+		local typeId = info.AssetTypeId
+		local property = ASSET_MAP[typeId]
+
+		if property then
+			-- If it's an accessory type, we add to the list; otherwise, we swap the ID
+			if property:find("Accessory") then
+				local accessories = description:GetAccessories(true)
+				table.insert(accessories, {AssetId = assetId, Order = #accessories + 1, AccessoryType = Enum.AccessoryType.Unknown})
+				description:SetAccessories(accessories, true)
+			else
+				description[property] = assetId
+			end
+			
+			local applySuccess, err = pcall(function() humanoid:ApplyDescription(description) end)
+			if not applySuccess then warn("❌ Apply Error: " .. err) end
+		end
+
+	elseif action == "ClearAll" then
+		humanoid:ApplyDescription(Instance.new("HumanoidDescription"))
+	end
+end)
+
+ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hex)
+	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	
+	local desc = hum:GetAppliedDescription()
+	hex = hex:gsub("#", "")
+	local r, g, b = tonumber(hex:sub(1,2), 16), tonumber(hex:sub(3,4), 16), tonumber(hex:sub(5,6), 16)
+	
+	if r and g and b then
+		local c = Color3.fromRGB(r,g,b)
+		desc.HeadColor, desc.LeftArmColor, desc.RightArmColor = c, c, c
+		desc.LeftLegColor, desc.RightLegColor, desc.TorsoColor = c, c, c
+		hum:ApplyDescription(desc)
+	end
+end)
