@@ -1,35 +1,37 @@
-  20:33:32.508  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:33:32.828  JointsService is deprecated, but an instance was added to JointsService: JointsService.Weld   -  Studio
-  20:33:32.952  Icon is not a valid member of Folder "Workspace.TopbarPlus"  -  Klien - READ_ME:30
-  20:33:32.952  Stack Begin  -  Studio
-  20:33:32.952  Script 'Workspace.TopbarPlus.READ_ME', Line 30  -  Studio - READ_ME:30
-  20:33:32.952  Stack End  -  Studio
-  20:33:32.961  DEBUG: Waiting for UI to load...  -  Klien - CatalogLocalLogic:22
-  20:33:32.977  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:33:35.761   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x13)  -  Studio
-  20:33:35.763   ▶ Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset. (x2)  -  Studio
-  20:33:35.763   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:33:35.764  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:33:37.407  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
-  20:33:37.407  Stack Begin  -  Studio
-  20:33:37.407  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
-  20:33:37.407  Stack End  -  Studio
-  20:33:37.408  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
-  20:33:37.408  Stack Begin  -  Studio
-  20:33:37.408  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
-  20:33:37.408  Stack End  -  Studio
-  20:33:37.623   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:33:37.623  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:33:37.629  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:33:37.820   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x2)  -  Studio
-  20:33:39.975  WowClippy v4 Loaded Successfully!  -  Klien
-  20:33:40.016  DEBUG: UI Found! SearchBox is: Players.fijisumm.PlayerGui.Avatar.FrameSearch.Search  -  Klien - CatalogLocalLogic:24
-  20:33:40.016  DEBUG: SearchBox Event Connected  -  Klien - CatalogLocalLogic:77
-  20:33:40.016  DEBUG: SkinHex Event Connected  -  Klien - CatalogLocalLogic:84
-  20:33:40.750   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x40)  -  Studio
-  20:33:45.544  DEBUG: User searched for: tpot  -  Klien - CatalogLocalLogic:29
-  20:33:45.545  ShoesAccessory is not a valid member of "Enum.AvatarAssetType"  -  Klien - CatalogLocalLogic:38
-  20:33:45.545  Stack Begin  -  Studio
-  20:33:45.545  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 38 - function performSearch  -  Studio - CatalogLocalLogic:38
-  20:33:45.545  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 75  -  Studio - CatalogLocalLogic:75
-  20:33:45.545  Stack End  -  Studio
+  20:36:07.496  JointsService is deprecated, but an instance was added to JointsService: JointsService.Weld   -  Studio
+  20:36:08.999   ▶ Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset. (x4)  -  Studio
+  20:36:09.001   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x13)  -  Studio
+  20:36:09.010   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x4)  -  Studio
+  20:36:07.585  Remote event invocation discarded event for RobloxReplicatedStorage.SendLikelySpeakingUsers; did you forget to implement OnClientEvent? (1 events dropped)  -  Studio
+  20:36:07.594  Icon is not a valid member of Folder "Workspace.TopbarPlus"  -  Klien - READ_ME:30
+  20:36:07.594  Stack Begin  -  Studio
+  20:36:07.594  Script 'Workspace.TopbarPlus.READ_ME', Line 30  -  Studio - READ_ME:30
+  20:36:07.594  Stack End  -  Studio
+  20:36:07.603  DEBUG: Waiting for UI to load...  -  Klien - CatalogLocalLogic:22
+  20:36:08.906  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
+  20:36:08.906  Stack Begin  -  Studio
+  20:36:08.906  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
+  20:36:08.906  Stack End  -  Studio
+  20:36:08.906  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
+  20:36:08.906  Stack Begin  -  Studio
+  20:36:08.907  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
+  20:36:08.907  Stack End  -  Studio
+  20:36:11.182  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
+  20:36:11.182  Stack Begin  -  Studio
+  20:36:11.182  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
+  20:36:11.182  Stack End  -  Studio
+  20:36:11.183  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
+  20:36:11.183  Stack Begin  -  Studio
+  20:36:11.183  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
+  20:36:11.183  Stack End  -  Studio
+  20:36:11.341  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
+  20:36:11.371  DEBUG: UI Found! SearchBox is: Search  -  Klien - CatalogLocalLogic:24
+  20:36:11.371  DEBUG: SearchBox Event Connected  -  Klien - CatalogLocalLogic:77
+  20:36:11.371  DEBUG: SkinHex Event Connected  -  Klien - CatalogLocalLogic:84
+  20:36:11.455   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x2)  -  Studio
+  20:36:11.475   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
+  20:36:11.674  WowClippy v4 Loaded Successfully!  -  Klien
+  20:36:11.789  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
+  20:36:11.857  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
+  20:36:13.838   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x40)  -  Studio
+  20:37:31.480  Disconnect from 128.116.46.33|52491  -  Studio
