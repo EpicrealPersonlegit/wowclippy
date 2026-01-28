@@ -1,58 +1,82 @@
-print("DEBUG SERVER: Starting Avatar Engine...")
+print("DEBUG: Script Starting...")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local MarketplaceService = game:GetService("MarketplaceService")
+local AvatarEditorService = game:GetService("AvatarEditorService")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- Helper to find a child even if it's nested deep
+local function findDeepChild(parent, name)
+	local child = parent:FindFirstChild(name, true) -- The 'true' makes it recursive
+	return child
+end
+
+print("DEBUG: Waiting for ScreenGui 'Avatar'...")
+local MainGui = PlayerGui:WaitForChild("Avatar", 10)
+
+if not MainGui then
+	error("DEBUG FATAL: ScreenGui 'Avatar' not found in PlayerGui! Is it named exactly 'Avatar'?")
+end
+
+print("DEBUG: Looking for FrameSearch recursively...")
+local FrameSearch = findDeepChild(MainGui, "FrameSearch")
+
+if not FrameSearch then
+	-- This will print EVERY child name so we can see what the script sees
+	warn("DEBUG ERROR: FrameSearch not found. Current children of " .. MainGui.Name .. ":")
+	for _, child in pairs(MainGui:GetDescendants()) do
+		print(" - Found: " .. child.Name .. " (Class: " .. child.ClassName .. ")")
+	end
+	return
+end
+
+print("DEBUG: Success! Found FrameSearch at path: " .. FrameSearch:GetFullName())
+
+local SearchBox = findDeepChild(FrameSearch, "Search")
+local ResultsFrame = findDeepChild(FrameSearch, "AvatarFrame")
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 
-local ASSET_MAP = {
-    [8] = "Hat", [11] = "Shirt", [12] = "Pants", [18] = "Face",
-    [27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
-    [41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
-    [44] = "ShoulderAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
-    [64] = "JacketAccessory", [65] = "SweaterAccessory", [66] = "ShortsAccessory",
-    [67] = "LeftShoeAccessory", [68] = "RightShoeAccessory"
-}
+print("DEBUG: Elements ready. SearchBox: " .. tostring(SearchBox ~= nil))
 
-EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
-    print("DEBUG SERVER: Received Event from " .. player.Name .. " | Action: " .. action .. " | ID: " .. tostring(assetId))
-    
-    local character = player.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then 
-        warn("DEBUG SERVER: No Humanoid found for " .. player.Name)
-        return 
-    end
+-- [Diagram of recursive search vs standard search in Roblox hierarchy]
+-- 
 
-    local description = humanoid:GetAppliedDescription()
+local function performSearch()
+	print("DEBUG: performSearch started for: " .. SearchBox.Text)
+	local text = SearchBox.Text:lower()
+	
+	-- Clear old buttons
+	for _, v in pairs(ResultsFrame:GetChildren()) do
+		if v:IsA("ImageButton") then v:Destroy() end
+	end
 
-    if action == "Equip" then
-        print("DEBUG SERVER: Fetching info for Asset " .. assetId)
-        local success, info = pcall(function() return MarketplaceService:GetProductInfo(assetId) end)
-        
-        if success and info then
-            local typeId = info.AssetTypeId
-            local prop = ASSET_MAP[typeId]
-            print("DEBUG SERVER: Asset Type " .. typeId .. " maps to: " .. tostring(prop))
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = text
+	params.AssetTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants, Enum.AvatarAssetType.JacketAccessory}
 
-            if prop then
-                if prop:find("Accessory") then
-                    local accs = description:GetAccessories(true)
-                    table.insert(accs, {AssetId = assetId, Order = #accs + 1, AccessoryType = Enum.AccessoryType.Unknown})
-                    description:SetAccessories(accs, true)
-                    print("DEBUG SERVER: Added Accessory to Description.")
-                else
-                    description[prop] = assetId
-                    print("DEBUG SERVER: Updated Property " .. prop .. " to ID " .. assetId)
-                end
-                
-                local applySuccess, err = pcall(function() humanoid:ApplyDescription(description) end)
-                if applySuccess then
-                    print("DEBUG SERVER: Applied successfully to " .. player.Name)
-                else
-                    warn("DEBUG SERVER ERROR: " .. err)
-                end
-            end
-        else
-            warn("DEBUG SERVER: Failed to fetch Marketplace info.")
-        end
-    end
-end)
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
+	if success and result then
+		local items = result:GetCurrentPage()
+		print("DEBUG: Found " .. #items .. " items.")
+		for _, item in pairs(items) do
+			local btn = Instance.new("ImageButton")
+			btn.Size = UDim2.new(0, 90, 0, 90)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			btn.MouseButton1Click:Connect(function()
+				print("DEBUG: Firing Equip for ID: " .. item.Id)
+				EquipEvent:FireServer(item.Id, "Equip")
+			end)
+		end
+	else
+		warn("DEBUG: Catalog API Error")
+	end
+end
+
+if SearchBox then
+	SearchBox.FocusLost:Connect(function(enter)
+		if enter then performSearch() end
+	end)
+end
