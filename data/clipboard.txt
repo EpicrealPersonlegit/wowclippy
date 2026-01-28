@@ -1,85 +1,30 @@
-local AvatarEditorService = game:GetService("AvatarEditorService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
-local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
-
-local SearchBox, ResultsFrame, SkinHexBox
-
-local function scanUI()
-	for _, v in pairs(PlayerGui:GetDescendants()) do
-		if v.Name == "Search" and v:IsA("TextBox") then SearchBox = v end
-		if v.Name == "AvatarFrame" then ResultsFrame = v end
-		if v.Name == "skinhex" and v:IsA("TextBox") then SkinHexBox = v end
-	end
-end
-
-print("DEBUG: Waiting for UI...")
-repeat scanUI(); task.wait(1) until SearchBox and ResultsFrame
-print("DEBUG: UI Found! SearchBox: " .. SearchBox:GetFullName())
-
--- Ensure a Grid Layout exists so buttons aren't on top of each other
-if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
-	local gl = Instance.new("UIGridLayout", ResultsFrame)
-	gl.CellSize = UDim2.new(0, 90, 0, 90)
-	gl.CellPadding = UDim2.new(0, 5, 0, 5)
-end
-
-local function performSearch()
-	local text = SearchBox.Text
-	if text == "" then return end
-	print("DEBUG: User searched for: " .. text)
-	
-	for _, v in pairs(ResultsFrame:GetChildren()) do
-		if v:IsA("ImageButton") then v:Destroy() end
-	end
-
-	local selectedTypes = {
-		Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, 
-		Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
-		Enum.AvatarAssetType.JacketAccessory, Enum.AvatarAssetType.SweaterAccessory,
-		Enum.AvatarAssetType.ShoeAccessory, -- Corrected spelling
-		Enum.AvatarAssetType.DynamicHead, Enum.AvatarAssetType.Torso,
-		Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm,
-		Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg
-	}
-
-	local params = CatalogSearchParams.new()
-	params.SearchKeyword = text
-	params.AssetTypes = selectedTypes
-
-	local success, result = pcall(function() 
-		return AvatarEditorService:SearchCatalog(params) 
-	end)
-	
-	if success and result then
-		local items = result:GetCurrentPage()
-		print("DEBUG: Items found in Catalog: " .. #items)
-		
-		for _, item in pairs(items) do
-			local btn = Instance.new("ImageButton")
-			btn.Name = tostring(item.Id)
-			btn.Size = UDim2.new(0, 90, 0, 90)
-			btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
-			btn.ZIndex = 10 -- Ensure it's on top
-			btn.Parent = ResultsFrame
-			
-			btn.MouseButton1Click:Connect(function()
-				print("DEBUG: Fire Equip for " .. item.Id)
-				EquipEvent:FireServer(item.Id, "Equip")
-			end)
-		end
-	else
-		warn("DEBUG: Catalog API Failed to fetch data.")
-	end
-end
-
--- Trigger search when pressing Enter
-SearchBox.FocusLost:Connect(function(enterPressed)
-	print("DEBUG: FocusLost fired. Enter: " .. tostring(enterPressed))
-	performSearch() -- Search regardless of enter for testing
-end)
+  20:39:23.530  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
+  20:39:24.380  JointsService is deprecated, but an instance was added to JointsService: JointsService.Weld   -  Studio
+  20:39:27.014  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
+  20:39:27.314   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x15)  -  Studio
+  20:39:30.038   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x4)  -  Studio
+  20:39:30.040   ▶ Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset. (x2)  -  Studio
+  20:39:27.194  Icon is not a valid member of Folder "Workspace.TopbarPlus"  -  Klien - READ_ME:30
+  20:39:27.194  Stack Begin  -  Studio
+  20:39:27.194  Script 'Workspace.TopbarPlus.READ_ME', Line 30  -  Studio - READ_ME:30
+  20:39:27.194  Stack End  -  Studio
+  20:39:27.203  DEBUG: Waiting for UI...  -  Klien - CatalogLocalLogic:20
+  20:39:28.964  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
+  20:39:28.965  Stack Begin  -  Studio
+  20:39:28.965  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
+  20:39:28.965  Stack End  -  Studio
+  20:39:28.965  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
+  20:39:28.965  Stack Begin  -  Studio
+  20:39:28.965  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
+  20:39:28.965  Stack End  -  Studio
+  20:39:31.573  DEBUG: UI Found! SearchBox: Players.fijisumm.PlayerGui.Avatar.FrameSearch.Search  -  Klien - CatalogLocalLogic:22
+  20:39:31.597   ▶ Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses (x3)  -  Studio
+  20:39:32.288  WowClippy v4 Loaded Successfully!  -  Klien
+  20:39:33.763   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x40)  -  Studio
+  20:40:20.518  DEBUG: FocusLost fired. Enter: true  -  Klien - CatalogLocalLogic:83
+  20:40:20.518  DEBUG: User searched for: hi  -  Klien - CatalogLocalLogic:34
+  20:40:20.518  ShoeAccessory is not a valid member of "Enum.AvatarAssetType"  -  Klien - CatalogLocalLogic:44
+  20:40:20.518  Stack Begin  -  Studio
+  20:40:20.518  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 44 - function performSearch  -  Studio - CatalogLocalLogic:44
+  20:40:20.518  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 84  -  Studio - CatalogLocalLogic:84
+  20:40:20.519  Stack End  -  Studio
