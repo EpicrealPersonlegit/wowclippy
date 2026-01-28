@@ -1,53 +1,86 @@
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local MarketplaceService = game:GetService("MarketplaceService")
-local EquipEvent = Instance.new("RemoteEvent")
-EquipEvent.Name = "EquipAssetEvent"
-EquipEvent.Parent = ReplicatedStorage
+local Players = game:GetService("Players")
 
--- Map Asset Types to HumanoidDescription properties
-local TYPE_MAP = {
-	[8] = "Hat", [11] = "Shirt", [12] = "Pants", [18] = "Face",
-	[41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
-	[44] = "ShoulderAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
-	[64] = "JacketAccessory", [65] = "SweaterAccessory", [67] = "LeftShoeAccessory", [68] = "RightShoeAccessory"
-}
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
-EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
+-- [[ UI HIERARCHY ]]
+local MainGui = PlayerGui:WaitForChild("Avatar")
+local FrameSearch = MainGui:WaitForChild("FrameSearch")
+local FrameSideBar = MainGui:WaitForChild("FrameSideBar")
 
-	local description = hum:GetAppliedDescription()
+local SearchBox = FrameSearch:WaitForChild("Search")
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame")
+
+-- Sidebar (Your specific names)
+local StringsBox = FrameSideBar:WaitForChild("Strings")
+local ApplyBtn = FrameSideBar:WaitForChild("Apply")
+local ClearABtn = FrameSideBar:WaitForChild("ClearA")
+local SkinHexBox = FrameSideBar:WaitForChild("skinhex")
+
+-- [[ SEARCH LOGIC ]]
+local function performSearch()
+	local text = SearchBox.Text
+	if text == "" then return end
 	
-	if action == "Equip" then
-		local success, info = pcall(function() return MarketplaceService:GetProductInfo(assetId) end)
-		if success and info then
-			local prop = TYPE_MAP[info.AssetTypeId]
-			if prop then
-				if prop:find("Accessory") then
-					-- Add to existing accessories
-					local accs = description:GetAccessories(true)
-					table.insert(accs, {AssetId = assetId, Order = #accs + 1, AccessoryType = Enum.AccessoryType.Unknown})
-					description:SetAccessories(accs, true)
-				else
-					-- Swap clothing/face
-					description[prop] = assetId
-				end
-			end
-		end
-	elseif action == "Unequip" then
-		-- Remove accessory from list
-		local accs = description:GetAccessories(true)
-		for i, data in pairs(accs) do
-			if data.AssetId == assetId then
-				table.remove(accs, i)
-				break
-			end
-		end
-		description:SetAccessories(accs, true)
+	for _, v in pairs(ResultsFrame:GetChildren()) do
+		if v:IsA("ImageButton") then v:Destroy() end
 	end
+
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = text
+	-- Valid Enums for modern Roblox
+	params.AssetTypes = {
+		Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory,
+		Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+		Enum.AvatarAssetType.Shoes, Enum.AvatarAssetType.Jacket
+	}
 	
-	-- Apply the changes to the character
-	local applySuccess, err = pcall(function() hum:ApplyDescription(description) end)
-	if not applySuccess then warn("Server Error: " .. err) end
+	local success, result = pcall(function() 
+		return AvatarEditorService:SearchCatalog(params) 
+	end)
+	
+	if success and result then
+		if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
+			local gl = Instance.new("UIGridLayout", ResultsFrame)
+			gl.CellSize = UDim2.new(0, 90, 0, 90)
+		end
+
+		for _, item in pairs(result:GetCurrentPage()) do
+			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
+			btn.Size = UDim2.new(0, 90, 0, 90)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			btn.MouseButton1Click:Connect(function()
+				EquipEvent:FireServer(item.Id, "Equip")
+			end)
+		end
+	end
+end
+
+-- [[ CONNECTIONS ]]
+ApplyBtn.MouseButton1Click:Connect(function()
+	local code = StringsBox.Text
+	if code ~= "" then
+		local id = tonumber(code, 36)
+		if id then EquipEvent:FireServer(id, "Equip") end
+	end
+end)
+
+ClearABtn.MouseButton1Click:Connect(function()
+	EquipEvent:FireServer(nil, "ClearAll")
+end)
+
+SkinHexBox.FocusLost:Connect(function(enter)
+	if SkinHexBox.Text ~= "" then
+		ChangeSkinColorEvent:FireServer(SkinHexBox.Text)
+	end
+end)
+
+SearchBox.FocusLost:Connect(function(enter)
+	if enter then performSearch() end
 end)
