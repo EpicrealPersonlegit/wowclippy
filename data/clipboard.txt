@@ -1,95 +1,58 @@
-print("DEBUG: Script Starting...")
-local AvatarEditorService = game:GetService("AvatarEditorService")
+print("DEBUG SERVER: Starting Avatar Engine...")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-
-print("DEBUG: Waiting for Remote Events...")
+local MarketplaceService = game:GetService("MarketplaceService")
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
-
-print("DEBUG: Searching for ScreenGui 'Avatar'...")
-local MainGui = PlayerGui:WaitForChild("Avatar")
-print("DEBUG: Found MainGui: " .. MainGui.Name)
-
--- This is where your error was happening. I added a 5-second timeout and print.
-local FrameSearch = MainGui:WaitForChild("FrameSearch", 5)
-if not FrameSearch then
-    warn("DEBUG ERROR: FrameSearch NOT FOUND inside Avatar! Check your hierarchy names.")
-    return
-end
-print("DEBUG: Found FrameSearch")
-
-local SearchBox = FrameSearch:WaitForChild("Search", 5)
-local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame", 5)
-print("DEBUG: UI Elements mapped. SearchBox: " .. tostring(SearchBox ~= nil))
-
--- Mapping for Limbs, Dynamic Faces, and Layered Clothing
-local TAG_DATA = {
-    ["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
-    ["shoe"] = {Enum.AvatarAssetType.LeftShoeAccessory, Enum.AvatarAssetType.RightShoeAccessory},
-    ["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
-    ["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
-    ["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
-    ["bundle"] = {Enum.AvatarAssetType.Bundle}
+local ASSET_MAP = {
+    [8] = "Hat", [11] = "Shirt", [12] = "Pants", [18] = "Face",
+    [27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
+    [41] = "HairAccessory", [42] = "FaceAccessory", [43] = "NeckAccessory",
+    [44] = "ShoulderAccessory", [45] = "FrontAccessory", [46] = "BackAccessory", [47] = "WaistAccessory",
+    [64] = "JacketAccessory", [65] = "SweaterAccessory", [66] = "ShortsAccessory",
+    [67] = "LeftShoeAccessory", [68] = "RightShoeAccessory"
 }
 
-local function performSearch()
-    print("DEBUG: Search function triggered for: " .. SearchBox.Text)
-    local text = SearchBox.Text:lower()
+EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
+    print("DEBUG SERVER: Received Event from " .. player.Name .. " | Action: " .. action .. " | ID: " .. tostring(assetId))
     
-    -- Clear results
-    local clearedCount = 0
-    for _, v in pairs(ResultsFrame:GetChildren()) do
-        if v:IsA("ImageButton") then v:Destroy() clearedCount += 1 end
-    end
-    print("DEBUG: Cleared " .. clearedCount .. " old buttons")
-
-    local selectedTypes = {
-        Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, 
-        Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
-        Enum.AvatarAssetType.JacketAccessory, Enum.AvatarAssetType.ShoesAccessory
-    }
-    
-    for tag, types in pairs(TAG_DATA) do
-        if text:find(tag) then
-            selectedTypes = types
-            print("DEBUG: Tag detected! Switched search category to: " .. tag)
-            break
-        end
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then 
+        warn("DEBUG SERVER: No Humanoid found for " .. player.Name)
+        return 
     end
 
-    local params = CatalogSearchParams.new()
-    params.SearchKeyword = text
-    params.AssetTypes = selectedTypes
+    local description = humanoid:GetAppliedDescription()
 
-    print("DEBUG: Calling AvatarEditorService...")
-    local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
-    
-    if success and result then
-        local items = result:GetCurrentPage()
-        print("DEBUG: Search Success! Found " .. #items .. " items.")
+    if action == "Equip" then
+        print("DEBUG SERVER: Fetching info for Asset " .. assetId)
+        local success, info = pcall(function() return MarketplaceService:GetProductInfo(assetId) end)
         
-        for i, item in pairs(items) do
-            local btn = Instance.new("ImageButton")
-            btn.Name = tostring(item.Id)
-            btn.Size = UDim2.new(0, 90, 0, 90)
-            btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
-            btn.Parent = ResultsFrame
-            
-            btn.MouseButton1Click:Connect(function()
-                print("DEBUG: Button Clicked! ID: " .. item.Id)
-                EquipEvent:FireServer(item.Id, "Equip")
-            end)
-        end
-    else
-        warn("DEBUG ERROR: Catalog Search API Failed!")
-    end
-end
+        if success and info then
+            local typeId = info.AssetTypeId
+            local prop = ASSET_MAP[typeId]
+            print("DEBUG SERVER: Asset Type " .. typeId .. " maps to: " .. tostring(prop))
 
-SearchBox.FocusLost:Connect(function(enter)
-    print("DEBUG: SearchBox FocusLost. Enter pressed: " .. tostring(enter))
-    if enter then performSearch() end
+            if prop then
+                if prop:find("Accessory") then
+                    local accs = description:GetAccessories(true)
+                    table.insert(accs, {AssetId = assetId, Order = #accs + 1, AccessoryType = Enum.AccessoryType.Unknown})
+                    description:SetAccessories(accs, true)
+                    print("DEBUG SERVER: Added Accessory to Description.")
+                else
+                    description[prop] = assetId
+                    print("DEBUG SERVER: Updated Property " .. prop .. " to ID " .. assetId)
+                end
+                
+                local applySuccess, err = pcall(function() humanoid:ApplyDescription(description) end)
+                if applySuccess then
+                    print("DEBUG SERVER: Applied successfully to " .. player.Name)
+                else
+                    warn("DEBUG SERVER ERROR: " .. err)
+                end
+            end
+        else
+            warn("DEBUG SERVER: Failed to fetch Marketplace info.")
+        end
+    end
 end)
