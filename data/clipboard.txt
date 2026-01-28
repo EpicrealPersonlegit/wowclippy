@@ -1,3 +1,87 @@
- Stack Begin  -  Studio
-  20:09:05.588  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 5  -  Studio - CatalogLocalLogic:5
-  20:09:05.588  Stack End  -  Studio
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Remote Events
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+
+-- NEW PATHING LOGIC: Find the UI inside PlayerGui
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- CHANGE "Avatar" to the actual name of your ScreenGui!
+local MainGui = PlayerGui:WaitForChild("Avatar", 10) 
+
+if not MainGui then
+	error("❌ Could not find the ScreenGui named 'Avatar' in PlayerGui!")
+end
+
+-- Now we find the frames inside that GUI
+local FrameSearch = MainGui:WaitForChild("FrameSearch", 5)
+local FrameSideBar = MainGui:WaitForChild("FrameSideBar", 5)
+
+if not FrameSearch or not FrameSideBar then
+	error("❌ UI Hierarchy Error: Check if FrameSearch and FrameSideBar are inside " .. MainGui.Name)
+end
+
+local SearchBox = FrameSearch:WaitForChild("Search")
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame")
+local SkinHexBox = FrameSideBar:FindFirstChild("skinhex")
+
+-- Tag Mapping for Limbs, Dynamic Faces, and Layered Clothing
+local TAG_DATA = {
+	["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
+	["sweater"] = {Enum.AvatarAssetType.SweaterAccessory},
+	["shoe"] = {Enum.AvatarAssetType.LeftShoeAccessory, Enum.AvatarAssetType.RightShoeAccessory},
+	["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
+	["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
+	["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
+	["torso"] = {Enum.AvatarAssetType.Torso},
+	["bundle"] = {Enum.AvatarAssetType.Bundle}
+}
+
+local function performSearch()
+	local text = SearchBox.Text:lower()
+	local selectedTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants}
+	
+	for tag, types in pairs(TAG_DATA) do
+		if text:find(tag) then
+			selectedTypes = types
+			break
+		end
+	end
+
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = text
+	params.AssetTypes = selectedTypes
+
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
+	if success then
+		-- Clear old results
+		for _, v in pairs(ResultsFrame:GetChildren()) do if v:IsA("ImageButton") then v:Destroy() end end
+		
+		-- Load results
+		for _, item in pairs(result:GetCurrentPage()) do
+			local btn = Instance.new("ImageButton")
+			btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+			btn.Size = UDim2.new(0, 100, 0, 100)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			
+			btn.MouseButton1Click:Connect(function()
+				EquipEvent:FireServer(item.Id, "Equip")
+			end)
+		end
+	end
+end
+
+-- Event Connections
+SearchBox.FocusLost:Connect(function(enter) if enter then performSearch() end end)
+
+if SkinHexBox then
+	SkinHexBox.FocusLost:Connect(function(enter)
+		if enter then ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end
+	end)
+end
