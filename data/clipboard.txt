@@ -1,1 +1,224 @@
-hiiiiiiiiii
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+
+-- Handle skin color changes
+ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hexColor)
+	local character = player.Character or player.CharacterAdded:Wait()
+	if not character then return end
+	
+	-- Wait for character to be fully loaded
+	if not character.PrimaryPart then
+		character:WaitForChild("HumanoidRootPart", 5)
+	end
+	
+	if hexColor and hexColor ~= "" then
+		-- Convert hex to RGB
+		local success, color = pcall(function()
+			-- Remove # if present
+			hexColor = hexColor:gsub("#", "")
+			-- Ensure 6 characters
+			if #hexColor == 3 then
+				hexColor = hexColor:sub(1,1)..hexColor:sub(1,1)..hexColor:sub(2,2)..hexColor:sub(2,2)..hexColor:sub(3,3)..hexColor:sub(3,3)
+			end
+			if #hexColor ~= 6 then return nil end
+			
+			local r = tonumber(hexColor:sub(1,2), 16) / 255
+			local g = tonumber(hexColor:sub(3,4), 16) / 255
+			local b = tonumber(hexColor:sub(5,6), 16) / 255
+			return Color3.new(r, g, b)
+		end)
+		
+		if success and color then
+			-- Find or create BodyColors
+			local bodyColors = character:FindFirstChild("BodyColors")
+			if not bodyColors then
+				bodyColors = Instance.new("BodyColors")
+				bodyColors.Parent = character
+			end
+			
+			bodyColors.HeadColor = color
+			bodyColors.LeftArmColor = color
+			bodyColors.RightArmColor = color
+			bodyColors.LeftLegColor = color
+			bodyColors.RightLegColor = color
+			bodyColors.TorsoColor = color
+			
+			print("✅ Applied skin color: " .. hexColor .. " to " .. player.Name)
+		else
+			warn("❌ Invalid hex color: " .. tostring(hexColor))
+		end
+	else
+		-- Reset to default skin color
+		local bodyColors = character:FindFirstChild("BodyColors")
+		if bodyColors then
+			bodyColors:Destroy()
+			print("✅ Reset skin color to default for " .. player.Name)
+		end
+	end
+end)
+
+EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
+	local character = player.Character or player.CharacterAdded:Wait()
+	if not character then return end
+
+	if action == "Equip" then
+		local success, model = pcall(function()
+			return game:GetService("InsertService"):LoadAsset(assetId)
+		end)
+		
+		if not success or not model then
+			warn("Failed to load asset: " .. assetId)
+			return
+		end
+		
+		local asset = model:GetChildren()[1]
+		if asset then
+			asset.Name = "Catalog_" .. assetId
+			
+			if asset:IsA("Accessory") then
+				-- Count existing accessories of the same type
+				local accessoryCount = 0
+				for _, existingAccessory in pairs(character:GetChildren()) do
+					if existingAccessory:IsA("Accessory") and existingAccessory.AccessoryType == asset.AccessoryType then
+						accessoryCount = accessoryCount + 1
+					end
+				end
+				
+				-- If we have 5 or more of this type, remove the oldest one
+				if accessoryCount >= 5 then
+					local oldestAccessory = nil
+					for _, existingAccessory in pairs(character:GetChildren()) do
+						if existingAccessory:IsA("Accessory") and existingAccessory.AccessoryType == asset.AccessoryType then
+							if not oldestAccessory or existingAccessory.Name < oldestAccessory.Name then
+								oldestAccessory = existingAccessory
+							end
+						end
+					end
+					if oldestAccessory then
+						oldestAccessory:Destroy()
+					end
+				end
+				
+				asset.Parent = character
+				print("✅ Equipped accessory: " .. assetId .. " to " .. player.Name)
+				
+			elseif asset:IsA("Clothing") or asset:IsA("ShirtGraphic") then
+				-- Remove existing clothing of the same type
+				for _, c in pairs(character:GetChildren()) do
+					if c:IsA(asset.ClassName) then c:Destroy() end
+				end
+				asset.Parent = character
+				print("✅ Equipped clothing: " .. assetId .. " to " .. player.Name)
+				
+			elseif asset:IsA("Decal") then
+				if character:FindFirstChild("Head") and character.Head:FindFirstChild("face") then
+					character.Head.face.Texture = asset.Texture
+					print("✅ Equipped face: " .. assetId .. " to " .. player.Name)
+				end
+				
+			elseif asset:IsA("BodyColors") then
+				-- Replace body colors
+				for _, c in pairs(character:GetChildren()) do
+					if c:IsA("BodyColors") then c:Destroy() end
+				end
+				asset.Parent = character
+				print("✅ Equipped body colors: " .. assetId .. " to " .. player.Name)
+				
+			elseif asset:IsA("CharacterMesh") then
+				-- Handle character meshes (like packages)
+				asset.Parent = character
+				print("✅ Equipped character mesh: " .. assetId .. " to " .. player.Name)
+				
+			elseif asset:IsA("Model") then
+				-- Handle packages (Korblox, Headless, etc.)
+				-- Check if this is a body part package
+				local isBodyPart = false
+				for _, child in pairs(asset:GetChildren()) do
+					if child:IsA("CharacterMesh") or child:IsA("Part") then
+						isBodyPart = true
+						break
+					end
+				end
+				
+				if isBodyPart then
+					-- Apply body parts from the package
+					for _, child in pairs(asset:GetChildren()) do
+						if child:IsA("CharacterMesh") then
+							-- Remove existing body part of same type
+							for _, existing in pairs(character:GetChildren()) do
+								if existing:IsA("CharacterMesh") and existing.BodyPart == child.BodyPart then
+									existing:Destroy()
+								end
+							end
+							child.Parent = character
+						elseif child:IsA("Part") and child.Name ~= "HumanoidRootPart" then
+							-- Replace body parts
+							local existingPart = character:FindFirstChild(child.Name)
+							if existingPart then
+								-- Copy properties
+								existingPart.BrickColor = child.BrickColor
+								existingPart.Material = child.Material
+								existingPart.Size = child.Size
+								existingPart.Mesh = child:FindFirstChild("Mesh")
+							end
+						end
+					end
+					print("✅ Equipped body package: " .. assetId .. " to " .. player.Name)
+				else
+					-- Regular model, just parent it
+					asset.Parent = character
+					print("✅ Equipped model: " .. assetId .. " to " .. player.Name)
+				end
+				
+			else
+				-- For any other asset types, just parent to character
+				asset.Parent = character
+				print("✅ Equipped asset: " .. assetId .. " to " .. player.Name)
+			end
+		end
+		model:Destroy()
+		
+	elseif action == "Remove" then
+		local item = character:FindFirstChild("Catalog_" .. assetId)
+		if item then 
+			item:Destroy() 
+			print("✅ Removed item: " .. assetId .. " from " .. player.Name)
+		else
+			-- Also check for items without the Catalog_ prefix (for compatibility)
+			for _, child in pairs(character:GetChildren()) do
+				if child:IsA("Accessory") and child.Name == tostring(assetId) then
+					child:Destroy()
+					print("✅ Removed accessory: " .. assetId .. " from " .. player.Name)
+					break
+				end
+			end
+		end
+		
+	elseif action == "ClearAll" then
+		-- Remove all catalog items (with Catalog_ prefix)
+		for _, child in pairs(character:GetChildren()) do
+			if string.find(child.Name, "Catalog_") then 
+				child:Destroy() 
+			end
+		end
+		
+		-- Also remove ALL accessories, clothing, and other avatar items
+		for _, child in pairs(character:GetChildren()) do
+			if child:IsA("Accessory") or child:IsA("Clothing") or child:IsA("ShirtGraphic") or child:IsA("BodyColors") or child:IsA("CharacterMesh") then
+				child:Destroy()
+			end
+		end
+		
+		-- Reset face to default
+		if character:FindFirstChild("Head") then
+			local face = character.Head:FindFirstChild("face")
+			if face then
+				face.Texture = "rbxasset://textures/face.png"
+			end
+		end
+		
+		print("✅ Cleared all avatar items from " .. player.Name)
+	end
+end)
+-- Ready --
