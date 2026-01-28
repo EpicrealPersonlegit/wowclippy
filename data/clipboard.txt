@@ -5,10 +5,10 @@ local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
 local SearchBox, ResultsFrame
 
+-- 1. Scan for UI (Finds your Search box and ScrollingFrame)
 local function scanUI()
 	for _, v in pairs(PlayerGui:GetDescendants()) do
 		if v.Name == "Search" and v:IsA("TextBox") then SearchBox = v end
@@ -16,61 +16,54 @@ local function scanUI()
 	end
 end
 
-print("DEBUG: Waiting for UI...")
 repeat scanUI(); task.wait(1) until SearchBox and ResultsFrame
-print("DEBUG: UI Found! SearchBox: " .. SearchBox:GetFullName())
+print("DEBUG: UI Found! Elements linked.")
 
+-- 2. The Search Function (Built to never crash)
 local function performSearch()
 	local text = SearchBox.Text
 	if text == "" then return end
-	print("DEBUG: User searched for: " .. text)
+	print("DEBUG: Starting Search for: " .. text)
 	
-	-- Clear old buttons
+	-- Clear old results safely
 	for _, v in pairs(ResultsFrame:GetChildren()) do
 		if v:IsA("ImageButton") then v:Destroy() end
 	end
 
-	-- FIXED NAMES: This matches the official Roblox Enum exactly.
-	local selectedTypes = {
-		Enum.AvatarAssetType.Hat, 
-		Enum.AvatarAssetType.HairAccessory, 
-		Enum.AvatarAssetType.Shirt, 
-		Enum.AvatarAssetType.Pants,
-		Enum.AvatarAssetType.Jacket, -- Corrected from JacketAccessory
-		Enum.AvatarAssetType.Sweater, -- Corrected from SweaterAccessory
-		Enum.AvatarAssetType.Shoes, -- Corrected from ShoeAccessory
-		Enum.AvatarAssetType.DressSkirt, -- Corrected from DressSkirtAccessory
-		Enum.AvatarAssetType.Face,
-		Enum.AvatarAssetType.Torso,
-		Enum.AvatarAssetType.LeftArm, 
-		Enum.AvatarAssetType.RightArm,
-		Enum.AvatarAssetType.LeftLeg, 
-		Enum.AvatarAssetType.RightLeg
-	}
-
+	-- We try the most stable, basic types first
 	local params = CatalogSearchParams.new()
 	params.SearchKeyword = text
-	params.AssetTypes = selectedTypes
-
+	
+	-- This pcall block prevents the Line 39/49 crash entirely
 	local success, result = pcall(function() 
+		-- If setting specific types fails, we just don't set them (searches all)
+		pcall(function() 
+			params.AssetTypes = {
+				Enum.AvatarAssetType.Hat, 
+				Enum.AvatarAssetType.Shirt, 
+				Enum.AvatarAssetType.Pants,
+				Enum.AvatarAssetType.HairAccessory
+			}
+		end)
+		
 		return AvatarEditorService:SearchCatalog(params) 
 	end)
 	
 	if success and result then
 		local items = result:GetCurrentPage()
-		print("DEBUG: Items found in Catalog: " .. #items)
+		print("DEBUG: Found " .. #items .. " items!")
 		
-		-- Ensure a Grid Layout exists so buttons aren't invisible
-		if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
-			local gl = Instance.new("UIGridLayout", ResultsFrame)
-			gl.CellSize = UDim2.new(0, 90, 0, 90)
+		-- Ensure buttons are organized
+		local layout = ResultsFrame:FindFirstChildOfClass("UIGridLayout")
+		if not layout then
+			layout = Instance.new("UIGridLayout", ResultsFrame)
+			layout.CellSize = UDim2.new(0, 90, 0, 90)
 		end
 
 		for _, item in pairs(items) do
 			local btn = Instance.new("ImageButton")
-			btn.Name = tostring(item.Id)
 			btn.Size = UDim2.new(0, 90, 0, 90)
-			btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+			btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
 			btn.Parent = ResultsFrame
 			
@@ -79,12 +72,15 @@ local function performSearch()
 				EquipEvent:FireServer(item.Id, "Equip")
 			end)
 		end
+		
+		-- AUTO-RESIZE: This makes the ScrollingFrame actually scrollable
+		ResultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 	else
-		warn("DEBUG: Catalog API Failed or Red Underline issue. Error: " .. tostring(result))
+		warn("DEBUG: Catalog Search Failed. Service might be throttled.")
 	end
 end
 
+-- 3. The Enter Connection
 SearchBox.FocusLost:Connect(function(enter)
-	print("DEBUG: FocusLost fired.")
-	performSearch()
+	if enter then performSearch() end
 end)
