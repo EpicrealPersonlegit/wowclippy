@@ -1,90 +1,63 @@
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local InsertService = game:GetService("InsertService")
-local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
--- Helper to get the AssetType from an ID (Crucial for HumanoidDescription)
-local function getAssetType(assetId)
-	local success, info = pcall(function()
-		return game:GetService("MarketplaceService"):GetProductInfo(assetId)
-	end)
-	return success and info.AssetTypeId or nil
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local SearchBox = script.Parent:WaitForChild("FrameSearch"):WaitForChild("Search")
+local ResultsFrame = script.Parent:WaitForChild("FrameSearch"):WaitForChild("AvatarFrame")
+
+-- Extended Tag Mapping for Modern Assets
+local TAGS = {
+	["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
+	["sweater"] = {Enum.AvatarAssetType.SweaterAccessory},
+	["shoes"] = {Enum.AvatarAssetType.ShoesAccessory},
+	["pants"] = {Enum.AvatarAssetType.Pants, Enum.AvatarAssetType.BottomAccessory},
+	["shirt"] = {Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.ShirtAccessory},
+	["hair"] = {Enum.AvatarAssetType.HairAccessory},
+	["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
+	["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
+	["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
+	["torso"] = {Enum.AvatarAssetType.Torso},
+	["bundle"] = {Enum.AvatarAssetType.Bundle}
+}
+
+local function performSearch()
+	local text = SearchBox.Text:lower()
+	local selectedTypes = {}
+	local cleanedQuery = text
+	
+	-- Extract tags
+	for tag, enums in pairs(TAGS) do
+		if text:find(tag) then
+			for _, e in pairs(enums) do table.insert(selectedTypes, e) end
+			cleanedQuery = cleanedQuery:gsub(tag, "")
+		end
+	end
+	
+	-- Fallback if no tags
+	if #selectedTypes == 0 then
+		selectedTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants}
+	end
+
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = cleanedQuery:match("^%s*(.-)%s*$")
+	params.AssetTypes = selectedTypes
+
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
+	if success then
+		for _, v in pairs(ResultsFrame:GetChildren()) do if v:IsA("ImageButton") then v:Destroy() end end
+		
+		for _, item in pairs(result:GetCurrentPage()) do
+			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
+			btn.Size = UDim2.new(0, 100, 0, 100)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			btn.MouseButton1Click:Connect(function()
+				EquipEvent:FireServer(item.Id, "Equip")
+			end)
+		end
+	end
 end
 
-EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return end
-
-	-- Get current description or create new one
-	local description = humanoid:GetAppliedDescription() or Instance.new("HumanoidDescription")
-
-	if action == "Equip" then
-		local assetType = getAssetType(assetId)
-		if not assetType then return end
-
-		-- 1. Handle Clothing & Faces via Description
-		-- Mapping AssetType IDs to HumanoidDescription properties
-		local typeMap = {
-			[2] = "TShirt", [11] = "Shirt", [12] = "Pants", [18] = "Face",
-			[27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
-			[61] = "FrontAccessory", [41] = "Hat", [42] = "HairAccessory", 
-			-- Layered Clothing
-			[64] = "BackAccessory", [65] = "WaistAccessory", [66] = "ClimbAnimation",
-			[73] = "MoodAnimation", [76] = "FaceAccessory", [77] = "ChinnerAccessory"
-		}
-
-		-- Special Handling for Accessories (allowing multiples)
-		local accessoryTypes = {8, 41, 42, 43, 44, 45, 46} -- Accessories
-		local isAccessory = table.find(accessoryTypes, assetType)
-
-		if isAccessory then
-			local currentAccessories = description:GetAccessories(true)
-			table.insert(currentAccessories, {
-				AssetId = assetId,
-				Order = #currentAccessories + 1,
-				AccessoryType = Enum.AccessoryType.Unknown -- Engine auto-detects
-			})
-			description:SetAccessories(currentAccessories, true)
-		else
-			-- Handle Limbs, Clothes, and Faces
-			local prop = typeMap[assetType]
-			if prop then
-				description[prop] = assetId
-			end
-		end
-
-		-- Apply the changes
-		local success, err = pcall(function()
-			humanoid:ApplyDescription(description)
-		end)
-		if not success then warn("Failed to apply: " .. err) end
-
-	elseif action == "ClearAll" then
-		humanoid:ApplyDescription(Instance.new("HumanoidDescription"))
-	end
-end)
-
--- Robust Skin Color Handler
-ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hexColor)
-	local char = player.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	
-	local desc = hum:GetAppliedDescription()
-	hexColor = hexColor:gsub("#", "")
-	local r = tonumber(hexColor:sub(1,2), 16)
-	local g = tonumber(hexColor:sub(3,4), 16)
-	local b = tonumber(hexColor:sub(5,6), 16)
-	
-	if r and g and b then
-		local color = Color3.fromRGB(r,g,b)
-		desc.HeadColor = color
-		desc.LeftArmColor = color
-		desc.RightArmColor = color
-		desc.LeftLegColor = color
-		desc.RightLegColor = color
-		desc.TorsoColor = color
-		hum:ApplyDescription(desc)
-	end
-end)
+SearchBox.FocusLost:Connect(function(enter) if enter then performSearch() end end)
