@@ -1,113 +1,95 @@
-print("DEBUG: Aggressive Script Starting...")
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AvatarEditorService = game:GetService("AvatarEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-
--- Variables to be filled
-local MainGui, FrameSearch, FrameSideBar, SearchBox, ResultsFrame, SkinHexBox
-
--- Aggressive Search Function
-local function initializeUI()
-	print("DEBUG: Searching for UI components...")
-	
-	-- 1. Find the ScreenGui (Try different names if 'Avatar' fails)
-	MainGui = PlayerGui:FindFirstChild("Avatar", true) 
-	
-	if MainGui then
-		print("DEBUG: Found ScreenGui: " .. MainGui:GetFullName())
-		
-		-- 2. Find the Frames (Recursive search)
-		FrameSearch = MainGui:FindFirstChild("FrameSearch", true)
-		FrameSideBar = MainGui:FindFirstChild("FrameSideBar", true)
-		
-		if FrameSearch and FrameSideBar then
-			-- 3. Find the specific elements
-			SearchBox = FrameSearch:FindFirstChild("Search", true)
-			ResultsFrame = FrameSearch:FindFirstChild("AvatarFrame", true)
-			SkinHexBox = FrameSideBar:FindFirstChild("skinhex", true)
-			
-			if SearchBox and ResultsFrame then
-				print("DEBUG: ✅ ALL UI ELEMENTS FOUND!")
-				return true
-			end
-		end
-	end
-	return false
-end
-
--- Keep trying until found
-local attempts = 0
-while not initializeUI() do
-	attempts += 1
-	if attempts > 20 then 
-		warn("DEBUG FATAL: UI still not found after 10 seconds. Check Explorer names!") 
-		break 
-	end
-	task.wait(0.5)
-end
-
--- REMOTE EVENTS
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
--- TAG DATA for Limbs, Faces, and Layered Clothing
-local TAG_DATA = {
-	["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
-	["shoe"] = {Enum.AvatarAssetType.LeftShoeAccessory, Enum.AvatarAssetType.RightShoeAccessory},
-	["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
-	["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
-	["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
-	["bundle"] = {Enum.AvatarAssetType.Bundle}
-}
+local SearchBox, ResultsFrame, SkinHexBox
 
+-- [[ DIAGRAM: HOW THE SCRIPT FINDS YOUR UI AUTOMATICALLY ]]
 -- 
 
+print("DEBUG: Scanning for UI elements...")
+
+-- Recursive scanner to find UI by name no matter where they are
+local function scanUI()
+	for _, v in pairs(PlayerGui:GetDescendants()) do
+		if v.Name == "Search" and v:IsA("TextBox") then SearchBox = v end
+		if v.Name == "AvatarFrame" then ResultsFrame = v end
+		if v.Name == "skinhex" and v:IsA("TextBox") then SkinHexBox = v end
+	end
+end
+
+-- Wait until the core UI is found
+repeat 
+	scanUI() 
+	task.wait(1) 
+until SearchBox and ResultsFrame
+
+print("DEBUG: ✅ Found SearchBox at: " .. SearchBox:GetFullName())
+print("DEBUG: ✅ Found ResultsFrame at: " .. ResultsFrame:GetFullName())
+
 local function performSearch()
-	print("DEBUG: Searching for: " .. SearchBox.Text)
 	local text = SearchBox.Text:lower()
+	print("DEBUG: Searching Catalog for: " .. text)
 	
+	-- Clear old results
 	for _, v in pairs(ResultsFrame:GetChildren()) do
 		if v:IsA("ImageButton") then v:Destroy() end
 	end
 
-	local selectedTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants}
-	for tag, types in pairs(TAG_DATA) do
-		if text:find(tag) then selectedTypes = types break end
-	end
+	-- Powerful Asset Type Support (Limbs, Dynamic Faces, Layered Clothes)
+	local selectedTypes = {
+		Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, 
+		Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+		Enum.AvatarAssetType.JacketAccessory, Enum.AvatarAssetType.ShoesAccessory,
+		Enum.AvatarAssetType.DynamicHead, Enum.AvatarAssetType.LeftArm,
+		Enum.AvatarAssetType.RightArm, Enum.AvatarAssetType.LeftLeg,
+		Enum.AvatarAssetType.RightLeg, Enum.AvatarAssetType.Torso
+	}
 
 	local params = CatalogSearchParams.new()
 	params.SearchKeyword = text
 	params.AssetTypes = selectedTypes
 
 	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
 	if success and result then
-		for _, item in pairs(result:GetCurrentPage()) do
+		local items = result:GetCurrentPage()
+		print("DEBUG: Search Success! Items found: " .. #items)
+		for _, item in pairs(items) do
 			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
 			btn.Size = UDim2.new(0, 90, 0, 90)
+			btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
 			btn.Parent = ResultsFrame
+			
+			-- Ensure there is a grid layout
+			if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
+				local gl = Instance.new("UIGridLayout", ResultsFrame)
+				gl.CellSize = UDim2.new(0, 90, 0, 90)
+			end
+
 			btn.MouseButton1Click:Connect(function()
+				print("DEBUG: Equipping ID " .. item.Id)
 				EquipEvent:FireServer(item.Id, "Equip")
 			end)
 		end
+	else
+		warn("DEBUG: Catalog API failed to return results.")
 	end
 end
 
--- Event Connections (Only if found)
-if SearchBox then
-	SearchBox.FocusLost:Connect(function(enter)
-		if enter then performSearch() end
-	end)
-end
+SearchBox.FocusLost:Connect(function(enter)
+	if enter then performSearch() end
+end)
 
 if SkinHexBox then
 	SkinHexBox.FocusLost:Connect(function(enter)
-		if enter then 
-			print("DEBUG: Sending Skin Color: " .. SkinHexBox.Text)
-			ChangeSkinColorEvent:FireServer(SkinHexBox.Text) 
-		end
+		if enter then ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end
 	end)
 end
