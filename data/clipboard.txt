@@ -1,70 +1,60 @@
-local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local AssetService = game:GetService("AssetService")
 
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
-local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+local EquipEvent = ReplicatedStorage:FindFirstChild("EquipAssetEvent") or Instance.new("RemoteEvent", ReplicatedStorage)
+EquipEvent.Name = "EquipAssetEvent"
+local SkinEvent = ReplicatedStorage:FindFirstChild("ChangeSkinColor") or Instance.new("RemoteEvent", ReplicatedStorage)
+SkinEvent.Name = "ChangeSkinColor"
 
--- [[ SEARCH & UI SETUP ]]
-local function getUI()
-    local avatar = PlayerGui:FindFirstChild("Avatar", true)
-    if not avatar then return nil end
-    
-    return {
-        Strings = avatar:FindFirstChild("Strings", true),
-        Apply = avatar:FindFirstChild("Apply", true),
-        ClearA = avatar:FindFirstChild("ClearA", true),
-        skinhex = avatar:FindFirstChild("skinhex", true),
-        Search = avatar:FindFirstChild("Search", true),
-        AvatarFrame = avatar:FindFirstChild("AvatarFrame", true)
-    }
-}
-
-local UI = getUI()
-while not UI do task.wait(0.1) UI = getUI() end
-
--- [[ THE SEARCH ENGINE ]]
-local function runSearch()
-    local text = UI.Search.Text
-    if text == "" then return end
-    
-    for _, child in pairs(UI.AvatarFrame:GetChildren()) do
-        if child:IsA("ImageButton") then child:Destroy() end
-    end
-
-    local params = CatalogSearchParams.new()
-    params.SearchKeyword = text
-    
-    local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
-    if success and result then
-        if not UI.AvatarFrame:FindFirstChildOfClass("UIGridLayout") then
-            local gl = Instance.new("UIGridLayout", UI.AvatarFrame)
-            gl.CellSize = UDim2.new(0, 90, 0, 90)
+local function applyBundle(hum, id)
+    local s, res = pcall(function() return AssetService:GetBundleDetailsAsync(id) end)
+    if s and res then
+        local d = hum:GetAppliedDescription()
+        for _, v in pairs(res.Items) do
+            if v.Type == "Asset" then
+                local i = MarketplaceService:GetProductInfo(v.Id)
+                if i.AssetTypeId == 27 then d.Torso = v.Id
+                elseif i.AssetTypeId == 28 then d.RightArm = v.Id
+                elseif i.AssetTypeId == 29 then d.LeftArm = v.Id
+                elseif i.AssetTypeId == 30 then d.LeftLeg = v.Id
+                elseif i.AssetTypeId == 31 then d.RightLeg = v.Id
+                end
+            end
         end
-        for _, item in pairs(result:GetCurrentPage()) do
-            local btn = Instance.new("ImageButton")
-            btn.Size = UDim2.new(0, 90, 0, 90)
-            btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
-            btn.Parent = UI.AvatarFrame
-            btn.MouseButton1Click:Connect(function() EquipEvent:FireServer(item.Id, "Equip") end)
-        end
+        hum:ApplyDescription(d)
     end
 end
 
--- [[ SIDEBAR LOGIC ]]
-UI.Apply.MouseButton1Click:Connect(function()
-    local id = tonumber(UI.Strings.Text, 36)
-    if id then EquipEvent:FireServer(id, "Equip") end
+EquipEvent.OnServerEvent:Connect(function(plr, id, action)
+    local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if action == "ClearAll" then hum:ApplyDescription(Instance.new("HumanoidDescription")) return end
+
+    local s, info = pcall(function() return MarketplaceService:GetProductInfo(id) end)
+    if s and info then
+        local d = hum:GetAppliedDescription()
+        if info.AssetTypeId == 37 then applyBundle(hum, id)
+        elseif info.AssetTypeId == 11 then d.Shirt = id
+        elseif info.AssetTypeId == 12 then d.Pants = id
+        else
+            local accs = d:GetAccessories(true)
+            table.insert(accs, {AssetId = id, Order = #accs+1, AccessoryType = Enum.AccessoryType.Unknown})
+            d:SetAccessories(accs, true)
+        end
+        hum:ApplyDescription(d)
+    end
 end)
 
-UI.ClearA.MouseButton1Click:Connect(function()
-    EquipEvent:FireServer(nil, "ClearAll")
+SkinEvent.OnServerEvent:Connect(function(plr, hex)
+    local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    hex = hex:gsub("#","")
+    local r, g, b = tonumber(hex:sub(1,2), 16), tonumber(hex:sub(3,4), 16), tonumber(hex:sub(5,6), 16)
+    if r and g and b then
+        local d = hum:GetAppliedDescription()
+        local c = Color3.fromRGB(r,g,b)
+        d.HeadColor, d.TorsoColor, d.LeftArmColor, d.RightArmColor, d.LeftLegColor, d.RightLegColor = c, c, c, c, c, c
+        hum:ApplyDescription(d)
+    end
 end)
-
-UI.skinhex.FocusLost:Connect(function()
-    if UI.skinhex.Text ~= "" then ChangeSkinColorEvent:FireServer(UI.skinhex.Text) end
-end)
-
-UI.Search.FocusLost:Connect(function(enter) if enter then runSearch() end end)
