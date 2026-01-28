@@ -8,7 +8,6 @@ local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 
 local SearchBox, ResultsFrame
 
--- 1. Scan for UI (Finds your Search box and ScrollingFrame)
 local function scanUI()
 	for _, v in pairs(PlayerGui:GetDescendants()) do
 		if v.Name == "Search" and v:IsA("TextBox") then SearchBox = v end
@@ -17,70 +16,59 @@ local function scanUI()
 end
 
 repeat scanUI(); task.wait(1) until SearchBox and ResultsFrame
-print("DEBUG: UI Found! Elements linked.")
+print("DEBUG: UI Elements found and ready!")
 
--- 2. The Search Function (Built to never crash)
 local function performSearch()
 	local text = SearchBox.Text
 	if text == "" then return end
-	print("DEBUG: Starting Search for: " .. text)
+	print("DEBUG: Sending request for: " .. text)
 	
-	-- Clear old results safely
+	-- Clear results
 	for _, v in pairs(ResultsFrame:GetChildren()) do
-		if v:IsA("ImageButton") then v:Destroy() end
+		if v:IsA("ImageButton") or v:IsA("UIGridLayout") then v:Destroy() end
 	end
+	
+	-- Add layout so we can see them
+	local layout = Instance.new("UIGridLayout", ResultsFrame)
+	layout.CellSize = UDim2.new(0, 90, 0, 90)
 
-	-- We try the most stable, basic types first
+	-- Search Params with ZERO extra settings to avoid Enum crashes
 	local params = CatalogSearchParams.new()
 	params.SearchKeyword = text
-	
-	-- This pcall block prevents the Line 39/49 crash entirely
+
+	-- The Actual Request
 	local success, result = pcall(function() 
-		-- If setting specific types fails, we just don't set them (searches all)
-		pcall(function() 
-			params.AssetTypes = {
-				Enum.AvatarAssetType.Hat, 
-				Enum.AvatarAssetType.Shirt, 
-				Enum.AvatarAssetType.Pants,
-				Enum.AvatarAssetType.HairAccessory
-			}
-		end)
-		
 		return AvatarEditorService:SearchCatalog(params) 
 	end)
 	
 	if success and result then
 		local items = result:GetCurrentPage()
-		print("DEBUG: Found " .. #items .. " items!")
+		print("DEBUG: Found " .. #items .. " items!") -- THIS MUST SHOW UP
 		
-		-- Ensure buttons are organized
-		local layout = ResultsFrame:FindFirstChildOfClass("UIGridLayout")
-		if not layout then
-			layout = Instance.new("UIGridLayout", ResultsFrame)
-			layout.CellSize = UDim2.new(0, 90, 0, 90)
+		if #items == 0 then
+			warn("DEBUG: The search returned 0 items. Try searching 'Red'.")
 		end
 
 		for _, item in pairs(items) do
 			local btn = Instance.new("ImageButton")
+			btn.Name = "Item_" .. item.Id
 			btn.Size = UDim2.new(0, 90, 0, 90)
-			btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 			btn.Parent = ResultsFrame
 			
 			btn.MouseButton1Click:Connect(function()
-				print("DEBUG: Fire Equip for " .. item.Id)
+				print("DEBUG: Equipping " .. item.Id)
 				EquipEvent:FireServer(item.Id, "Equip")
 			end)
 		end
-		
-		-- AUTO-RESIZE: This makes the ScrollingFrame actually scrollable
-		ResultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20)
 	else
-		warn("DEBUG: Catalog Search Failed. Service might be throttled.")
+		-- If it fails, this will tell us EXACTLY why
+		warn("DEBUG ERROR: Search failed! Reason: " .. tostring(result))
 	end
 end
 
--- 3. The Enter Connection
-SearchBox.FocusLost:Connect(function(enter)
-	if enter then performSearch() end
+-- Force search on any focus loss
+SearchBox.FocusLost:Connect(function()
+	performSearch()
 end)
