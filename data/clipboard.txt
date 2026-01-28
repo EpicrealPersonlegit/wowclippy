@@ -7,6 +7,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 
 local SearchBox, ResultsFrame
+local EquippedItems = {} -- Track what we are wearing locally
 
 local function scanUI()
 	for _, v in pairs(PlayerGui:GetDescendants()) do
@@ -16,59 +17,53 @@ local function scanUI()
 end
 
 repeat scanUI(); task.wait(1) until SearchBox and ResultsFrame
-print("DEBUG: UI Elements found and ready!")
 
 local function performSearch()
 	local text = SearchBox.Text
 	if text == "" then return end
-	print("DEBUG: Sending request for: " .. text)
 	
-	-- Clear results
 	for _, v in pairs(ResultsFrame:GetChildren()) do
-		if v:IsA("ImageButton") or v:IsA("UIGridLayout") then v:Destroy() end
+		if v:IsA("ImageButton") then v:Destroy() end
 	end
-	
-	-- Add layout so we can see them
-	local layout = Instance.new("UIGridLayout", ResultsFrame)
-	layout.CellSize = UDim2.new(0, 90, 0, 90)
 
-	-- Search Params with ZERO extra settings to avoid Enum crashes
 	local params = CatalogSearchParams.new()
 	params.SearchKeyword = text
 
-	-- The Actual Request
-	local success, result = pcall(function() 
-		return AvatarEditorService:SearchCatalog(params) 
-	end)
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
 	
 	if success and result then
-		local items = result:GetCurrentPage()
-		print("DEBUG: Found " .. #items .. " items!") -- THIS MUST SHOW UP
-		
-		if #items == 0 then
-			warn("DEBUG: The search returned 0 items. Try searching 'Red'.")
-		end
-
-		for _, item in pairs(items) do
+		for _, item in pairs(result:GetCurrentPage()) do
 			local btn = Instance.new("ImageButton")
-			btn.Name = "Item_" .. item.Id
+			btn.Name = tostring(item.Id)
 			btn.Size = UDim2.new(0, 90, 0, 90)
 			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
 			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 			btn.Parent = ResultsFrame
 			
+			-- THE TOGGLE STROKE
+			local stroke = Instance.new("UIStroke")
+			stroke.Thickness = 3
+			stroke.Color = Color3.fromRGB(0, 255, 100) -- Green for equipped
+			stroke.Enabled = EquippedItems[item.Id] or false
+			stroke.Parent = btn
+
 			btn.MouseButton1Click:Connect(function()
-				print("DEBUG: Equipping " .. item.Id)
-				EquipEvent:FireServer(item.Id, "Equip")
+				if EquippedItems[item.Id] then
+					-- UNWEAR
+					EquippedItems[item.Id] = nil
+					stroke.Enabled = false
+					EquipEvent:FireServer(item.Id, "Unequip")
+					print("DEBUG: Sent Unequip for " .. item.Id)
+				else
+					-- WEAR
+					EquippedItems[item.Id] = true
+					stroke.Enabled = true
+					EquipEvent:FireServer(item.Id, "Equip")
+					print("DEBUG: Sent Equip for " .. item.Id)
+				end
 			end)
 		end
-	else
-		-- If it fails, this will tell us EXACTLY why
-		warn("DEBUG ERROR: Search failed! Reason: " .. tostring(result))
 	end
 end
 
--- Force search on any focus loss
-SearchBox.FocusLost:Connect(function()
-	performSearch()
-end)
+SearchBox.FocusLost:Connect(function(enter) if enter then performSearch() end end)
