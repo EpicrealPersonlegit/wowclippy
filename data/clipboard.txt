@@ -1,20 +1,15 @@
+-- [[ Line 1: Setup ]]
 local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local SearchBox, ResultsFrame, SkinHexBox
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
-local SearchBox, ResultsFrame, SkinHexBox
-
--- [[ DIAGRAM: HOW THE SCRIPT FINDS YOUR UI AUTOMATICALLY ]]
--- 
-
-print("DEBUG: Scanning for UI elements...")
-
--- Recursive scanner to find UI by name no matter where they are
+-- [[ Line 12: Aggressive Scanning ]]
 local function scanUI()
 	for _, v in pairs(PlayerGui:GetDescendants()) do
 		if v.Name == "Search" and v:IsA("TextBox") then SearchBox = v end
@@ -23,25 +18,20 @@ local function scanUI()
 	end
 end
 
--- Wait until the core UI is found
-repeat 
-	scanUI() 
-	task.wait(1) 
-until SearchBox and ResultsFrame
+-- [[ Line 20: Wait Logic ]]
+print("DEBUG: Waiting for UI to load...")
+repeat scanUI(); task.wait(1) until SearchBox and ResultsFrame
+print("DEBUG: UI Found! SearchBox is: " .. SearchBox:GetFullName())
 
-print("DEBUG: ✅ Found SearchBox at: " .. SearchBox:GetFullName())
-print("DEBUG: ✅ Found ResultsFrame at: " .. ResultsFrame:GetFullName())
-
+-- [[ Line 25: Search Logic ]]
 local function performSearch()
 	local text = SearchBox.Text:lower()
-	print("DEBUG: Searching Catalog for: " .. text)
+	print("DEBUG: User searched for: " .. text)
 	
-	-- Clear old results
 	for _, v in pairs(ResultsFrame:GetChildren()) do
 		if v:IsA("ImageButton") then v:Destroy() end
 	end
 
-	-- Powerful Asset Type Support (Limbs, Dynamic Faces, Layered Clothes)
 	local selectedTypes = {
 		Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, 
 		Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
@@ -55,41 +45,42 @@ local function performSearch()
 	params.SearchKeyword = text
 	params.AssetTypes = selectedTypes
 
-	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	-- [[ Line 46: The Red-Underline Service Call ]]
+	local success, result = pcall(function() 
+		return AvatarEditorService:SearchCatalog(params) 
+	end)
 	
 	if success and result then
 		local items = result:GetCurrentPage()
-		print("DEBUG: Search Success! Items found: " .. #items)
+		print("DEBUG: Results found: " .. #items)
 		for _, item in pairs(items) do
 			local btn = Instance.new("ImageButton")
-			btn.Name = tostring(item.Id)
 			btn.Size = UDim2.new(0, 90, 0, 90)
-			btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+			btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
 			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
 			btn.Parent = ResultsFrame
 			
-			-- Ensure there is a grid layout
-			if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
-				local gl = Instance.new("UIGridLayout", ResultsFrame)
-				gl.CellSize = UDim2.new(0, 90, 0, 90)
-			end
-
 			btn.MouseButton1Click:Connect(function()
-				print("DEBUG: Equipping ID " .. item.Id)
 				EquipEvent:FireServer(item.Id, "Equip")
 			end)
 		end
-	else
-		warn("DEBUG: Catalog API failed to return results.")
 	end
 end
 
-SearchBox.FocusLost:Connect(function(enter)
-	if enter then performSearch() end
+-- [[ Line 68: The Connection Logic (Old Line 88) ]]
+-- We use a pcall here so it NEVER crashes the script
+pcall(function()
+	if SearchBox then
+		SearchBox.FocusLost:Connect(function(enter)
+			if enter then performSearch() end
+		end)
+		print("DEBUG: SearchBox Event Connected")
+	end
+	
+	if SkinHexBox then
+		SkinHexBox.FocusLost:Connect(function(enter)
+			if enter then ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end
+		end)
+		print("DEBUG: SkinHex Event Connected")
+	end
 end)
-
-if SkinHexBox then
-	SkinHexBox.FocusLost:Connect(function(enter)
-		if enter then ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end
-	end)
-end
