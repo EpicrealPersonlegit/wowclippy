@@ -1,224 +1,358 @@
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
--- Handle skin color changes
-ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hexColor)
-	local character = player.Character or player.CharacterAdded:Wait()
-	if not character then return end
-	
-	-- Wait for character to be fully loaded
-	if not character.PrimaryPart then
-		character:WaitForChild("HumanoidRootPart", 5)
+-- Wait for remote events
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent", 10)
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor", 10)
+
+-- Get the organized frames
+local FrameSearch = script.Parent:WaitForChild("FrameSearch", 5)
+local FrameSideBar = script.Parent:WaitForChild("FrameSideBar", 5)
+
+-- Get UI elements from their proper frames
+local SearchBox = FrameSearch:WaitForChild("Search", 5)
+local SearchBtn = FrameSearch:FindFirstChild("SearchConfirm")
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame", 5)
+local StringsBox = FrameSideBar:FindFirstChild("Strings")
+local ApplyBtn = FrameSideBar:FindFirstChild("Apply")
+local ClearBtn = FrameSideBar:FindFirstChild("ClearA")
+local SkinHexBox = FrameSideBar:FindFirstChild("skinhex")
+
+-- Initialize worn items tracking
+local wornItems = {}
+local searchDebounce = false
+
+-- Helper: Update Strings Box
+local chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+local function toBase36(n)
+	n = tonumber(n)
+	local res = ""
+	while n > 0 do
+		local f = math.floor(n / 36)
+		local r = n % 36
+		res = string.sub(chars, r + 1, r + 1) .. res
+		n = f
 	end
-	
-	if hexColor and hexColor ~= "" then
-		-- Convert hex to RGB
-		local success, color = pcall(function()
-			-- Remove # if present
-			hexColor = hexColor:gsub("#", "")
-			-- Ensure 6 characters
-			if #hexColor == 3 then
-				hexColor = hexColor:sub(1,1)..hexColor:sub(1,1)..hexColor:sub(2,2)..hexColor:sub(2,2)..hexColor:sub(3,3)..hexColor:sub(3,3)
-			end
-			if #hexColor ~= 6 then return nil end
-			
-			local r = tonumber(hexColor:sub(1,2), 16) / 255
-			local g = tonumber(hexColor:sub(3,4), 16) / 255
-			local b = tonumber(hexColor:sub(5,6), 16) / 255
-			return Color3.new(r, g, b)
-		end)
-		
-		if success and color then
-			-- Find or create BodyColors
-			local bodyColors = character:FindFirstChild("BodyColors")
-			if not bodyColors then
-				bodyColors = Instance.new("BodyColors")
-				bodyColors.Parent = character
-			end
-			
-			bodyColors.HeadColor = color
-			bodyColors.LeftArmColor = color
-			bodyColors.RightArmColor = color
-			bodyColors.LeftLegColor = color
-			bodyColors.RightLegColor = color
-			bodyColors.TorsoColor = color
-			
-			print("✅ Applied skin color: " .. hexColor .. " to " .. player.Name)
-		else
-			warn("❌ Invalid hex color: " .. tostring(hexColor))
-		end
+	return res == "" and "0" or res
+end
+
+local function updateStringsUI()
+	if not StringsBox then return end
+	local t = {}
+	for id, _ in pairs(wornItems) do table.insert(t, toBase36(id)) end
+	StringsBox.Text = table.concat(t, "-")
+end
+
+local function toggleItem(assetId, button)
+	if wornItems[assetId] then
+		wornItems[assetId] = nil
+		if button then local s = button:FindFirstChild("UIStroke") if s then s.Enabled = false end end
+		EquipEvent:FireServer(assetId, "Remove")
 	else
-		-- Reset to default skin color
-		local bodyColors = character:FindFirstChild("BodyColors")
-		if bodyColors then
-			bodyColors:Destroy()
-			print("✅ Reset skin color to default for " .. player.Name)
+		wornItems[assetId] = true
+		if button then
+			local s = button:FindFirstChild("UIStroke") or Instance.new("UIStroke", button)
+			s.Color = Color3.fromRGB(0, 255, 120)
+			s.Thickness = 3
+			s.Enabled = true
+		end
+		EquipEvent:FireServer(assetId, "Equip")
+	end
+	updateStringsUI()
+end
+
+-- CLEAR ALL
+if ClearBtn then
+	ClearBtn.MouseButton1Click:Connect(function()
+		wornItems = {}
+		updateStringsUI()
+		for _, c in pairs(ResultsFrame:GetChildren()) do
+			if c:IsA("ImageButton") then local s = c:FindFirstChild("UIStroke") if s then s.Enabled = false end end
+		end
+		EquipEvent:FireServer(nil, "ClearAll")
+	end)
+end
+
+-- ADVANCED TAGGING SYSTEM (FIXED)
+local function parseSearchTags(searchText)
+	local tags = {}
+	local remainingText = searchText
+	
+	-- Define all supported tags using ONLY VALID enums from working reference
+	local tagMappings = {
+		-- Body parts (using clothing types)
+		["torso"] = {Enum.AvatarAssetType.Shirt},
+		["leftarm"] = {Enum.AvatarAssetType.Shirt},
+		["rightarm"] = {Enum.AvatarAssetType.Shirt},
+		["arms"] = {Enum.AvatarAssetType.Shirt},
+		["leftleg"] = {Enum.AvatarAssetType.Pants},
+		["rightleg"] = {Enum.AvatarAssetType.Pants},
+		["legs"] = {Enum.AvatarAssetType.Pants},
+		
+		-- Face types
+		["dynamicface"] = {Enum.AvatarAssetType.Face},
+		["face"] = {Enum.AvatarAssetType.Face},
+		["faces"] = {Enum.AvatarAssetType.Face},
+		
+		-- Clothing
+		["shirt"] = {Enum.AvatarAssetType.Shirt},
+		["tshirt"] = {Enum.AvatarAssetType.TShirt},
+		["pants"] = {Enum.AvatarAssetType.Pants},
+		["clothed"] = {Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants, Enum.AvatarAssetType.TShirt},
+		
+		-- Accessories (using only valid ones from reference)
+		["accessory"] = {
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, 
+			Enum.AvatarAssetType.BackAccessory, Enum.AvatarAssetType.ShoulderAccessory,
+			Enum.AvatarAssetType.FrontAccessory
+		},
+		["hat"] = {Enum.AvatarAssetType.Hat},
+		["hair"] = {Enum.AvatarAssetType.HairAccessory},
+		["back"] = {Enum.AvatarAssetType.BackAccessory},
+		["shoulder"] = {Enum.AvatarAssetType.ShoulderAccessory},
+		["front"] = {Enum.AvatarAssetType.FrontAccessory},
+		
+		-- Special: For body packages like Korblox, we'll search all types and filter on server
+		["korblox"] = {
+			Enum.AvatarAssetType.Face, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.BackAccessory,
+			Enum.AvatarAssetType.ShoulderAccessory, Enum.AvatarAssetType.FrontAccessory
+		},
+		["headless"] = {
+			Enum.AvatarAssetType.Face, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.BackAccessory,
+			Enum.AvatarAssetType.ShoulderAccessory, Enum.AvatarAssetType.FrontAccessory
+		},
+		["slender"] = {
+			Enum.AvatarAssetType.Face, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.BackAccessory,
+			Enum.AvatarAssetType.ShoulderAccessory, Enum.AvatarAssetType.FrontAccessory
+		}
+	}
+	
+	-- Find and extract tags from search text
+	for tag, assetTypes in pairs(tagMappings) do
+		if string.lower(remainingText):find(tag) then
+			table.insert(tags, {
+				tag = tag,
+				assetTypes = assetTypes
+			})
+			remainingText = string.lower(remainingText):gsub(tag, ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 		end
 	end
-end)
+	
+	return tags, remainingText
+end
 
-EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
-	local character = player.Character or player.CharacterAdded:Wait()
-	if not character then return end
+-- ADVANCED SEARCH FUNCTION
+local function performSearch()
+	if searchDebounce then return end
+	
+	local text = SearchBox.Text
+	if text == "" then return end
+	
+	searchDebounce = true
+	
+	-- Clear old buttons
+	for _, c in pairs(ResultsFrame:GetChildren()) do 
+		if c:IsA("ImageButton") then 
+			c:Destroy() 
+		end 
+	end
 
-	if action == "Equip" then
-		local success, model = pcall(function()
-			return game:GetService("InsertService"):LoadAsset(assetId)
-		end)
-		
-		if not success or not model then
-			warn("Failed to load asset: " .. assetId)
-			return
-		end
-		
-		local asset = model:GetChildren()[1]
-		if asset then
-			asset.Name = "Catalog_" .. assetId
-			
-			if asset:IsA("Accessory") then
-				-- Count existing accessories of the same type
-				local accessoryCount = 0
-				for _, existingAccessory in pairs(character:GetChildren()) do
-					if existingAccessory:IsA("Accessory") and existingAccessory.AccessoryType == asset.AccessoryType then
-						accessoryCount = accessoryCount + 1
-					end
+	-- Try the advanced tagging system first
+	local success, tags, remainingText = pcall(function()
+		return parseSearchTags(text)
+	end)
+	
+	-- If tagging fails, fall back to original search
+	if not success then
+		warn("[AdvancedSearch]: Tag parsing failed, using fallback search")
+		tags = {}
+		remainingText = text
+	end
+	
+	-- Determine asset types based on tags
+	local assetTypes = {}
+	if #tags > 0 then
+		-- Combine all asset types from found tags
+		local seenTypes = {}
+		for _, tag in pairs(tags) do
+			for _, assetType in pairs(tag.assetTypes) do
+				if not seenTypes[assetType] then
+					table.insert(assetTypes, assetType)
+					seenTypes[assetType] = true
 				end
-				
-				-- If we have 5 or more of this type, remove the oldest one
-				if accessoryCount >= 5 then
-					local oldestAccessory = nil
-					for _, existingAccessory in pairs(character:GetChildren()) do
-						if existingAccessory:IsA("Accessory") and existingAccessory.AccessoryType == asset.AccessoryType then
-							if not oldestAccessory or existingAccessory.Name < oldestAccessory.Name then
-								oldestAccessory = existingAccessory
-							end
-						end
-					end
-					if oldestAccessory then
-						oldestAccessory:Destroy()
-					end
-				end
-				
-				asset.Parent = character
-				print("✅ Equipped accessory: " .. assetId .. " to " .. player.Name)
-				
-			elseif asset:IsA("Clothing") or asset:IsA("ShirtGraphic") then
-				-- Remove existing clothing of the same type
-				for _, c in pairs(character:GetChildren()) do
-					if c:IsA(asset.ClassName) then c:Destroy() end
-				end
-				asset.Parent = character
-				print("✅ Equipped clothing: " .. assetId .. " to " .. player.Name)
-				
-			elseif asset:IsA("Decal") then
-				if character:FindFirstChild("Head") and character.Head:FindFirstChild("face") then
-					character.Head.face.Texture = asset.Texture
-					print("✅ Equipped face: " .. assetId .. " to " .. player.Name)
-				end
-				
-			elseif asset:IsA("BodyColors") then
-				-- Replace body colors
-				for _, c in pairs(character:GetChildren()) do
-					if c:IsA("BodyColors") then c:Destroy() end
-				end
-				asset.Parent = character
-				print("✅ Equipped body colors: " .. assetId .. " to " .. player.Name)
-				
-			elseif asset:IsA("CharacterMesh") then
-				-- Handle character meshes (like packages)
-				asset.Parent = character
-				print("✅ Equipped character mesh: " .. assetId .. " to " .. player.Name)
-				
-			elseif asset:IsA("Model") then
-				-- Handle packages (Korblox, Headless, etc.)
-				-- Check if this is a body part package
-				local isBodyPart = false
-				for _, child in pairs(asset:GetChildren()) do
-					if child:IsA("CharacterMesh") or child:IsA("Part") then
-						isBodyPart = true
-						break
-					end
-				end
-				
-				if isBodyPart then
-					-- Apply body parts from the package
-					for _, child in pairs(asset:GetChildren()) do
-						if child:IsA("CharacterMesh") then
-							-- Remove existing body part of same type
-							for _, existing in pairs(character:GetChildren()) do
-								if existing:IsA("CharacterMesh") and existing.BodyPart == child.BodyPart then
-									existing:Destroy()
-								end
-							end
-							child.Parent = character
-						elseif child:IsA("Part") and child.Name ~= "HumanoidRootPart" then
-							-- Replace body parts
-							local existingPart = character:FindFirstChild(child.Name)
-							if existingPart then
-								-- Copy properties
-								existingPart.BrickColor = child.BrickColor
-								existingPart.Material = child.Material
-								existingPart.Size = child.Size
-								existingPart.Mesh = child:FindFirstChild("Mesh")
-							end
-						end
-					end
-					print("✅ Equipped body package: " .. assetId .. " to " .. player.Name)
-				else
-					-- Regular model, just parent it
-					asset.Parent = character
-					print("✅ Equipped model: " .. assetId .. " to " .. player.Name)
-				end
-				
-			else
-				-- For any other asset types, just parent to character
-				asset.Parent = character
-				print("✅ Equipped asset: " .. assetId .. " to " .. player.Name)
 			end
 		end
-		model:Destroy()
+		print("[AdvancedSearch]: Found tags: " .. table.concat(tags, ", ", 1, #tags))
+		print("[AdvancedSearch]: Asset types: " .. #assetTypes .. " categories")
+	else
+		-- Default asset types if no tags found
+		assetTypes = {
+			Enum.AvatarAssetType.Face, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.BackAccessory,
+			Enum.AvatarAssetType.ShoulderAccessory, Enum.AvatarAssetType.FrontAccessory,
+			Enum.AvatarAssetType.TShirt, Enum.AvatarAssetType.Body
+		}
+		print("[AdvancedSearch]: No tags found, using default categories")
+	end
+
+	local params = CatalogSearchParams.new()
+	-- Use remaining text as search keyword (with tags removed)
+	if remainingText ~= "" then
+		params.SearchKeyword = remainingText
+	else
+		-- If no remaining text, search for everything in the selected categories
+		params.SearchKeyword = ""
+	end
+	params.AssetTypes = assetTypes
+
+	local searchSuccess, result = pcall(function()
+		return AvatarEditorService:SearchCatalog(params)
+	end)
+
+	if searchSuccess then
+		-- Load up to 100 items across multiple pages
+		local allItems = {}
+		local pages = result:GetCurrentPage()
 		
-	elseif action == "Remove" then
-		local item = character:FindFirstChild("Catalog_" .. assetId)
-		if item then 
-			item:Destroy() 
-			print("✅ Removed item: " .. assetId .. " from " .. player.Name)
+		-- Add first page items
+		for _, item in pairs(pages) do
+			table.insert(allItems, item)
+		end
+		
+		-- Load additional pages until we have 100 items or no more pages
+		while #allItems < 100 and result.IsFinished == false do
+			local success2 = pcall(function()
+				result:AdvanceToNextPageAsync()
+			end)
+			
+			if success2 then
+				local nextPage = result:GetCurrentPage()
+				for _, item in pairs(nextPage) do
+					table.insert(allItems, item)
+					if #allItems >= 100 then break end
+				end
+			else
+				break
+			end
+		end
+		
+		-- Create buttons for all loaded items
+		for _, item in pairs(allItems) do
+			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
+			btn.Size = UDim2.new(0, 100, 0, 100)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+			btn.Parent = ResultsFrame
+			
+			-- Add tooltip showing asset type
+			local assetTypeName = item.AssetType and item.AssetType.Name or "Unknown"
+			btn.ToolTip = "ID: " .. item.Id .. " | Type: " .. assetTypeName
+			
+			-- Re-apply stroke if worn
+			if wornItems[item.Id] then
+				local s = Instance.new("UIStroke", btn)
+				s.Color = Color3.fromRGB(0,255,120) s.Thickness = 3 s.Enabled = true
+			end
+
+			btn.MouseButton1Click:Connect(function() toggleItem(item.Id, btn) end)
+		end
+		
+		print("[AdvancedSearch]: Found " .. #allItems .. " items for '" .. text .. "'")
+	else
+		warn("[AdvancedSearch]: Search failed for '" .. text .. "', falling back to basic search")
+		
+		-- Fallback to basic search
+		local fallbackParams = CatalogSearchParams.new()
+		fallbackParams.SearchKeyword = text
+		fallbackParams.AssetTypes = {
+			Enum.AvatarAssetType.Face, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+			Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.BackAccessory,
+			Enum.AvatarAssetType.ShoulderAccessory, Enum.AvatarAssetType.FrontAccessory
+		}
+		
+		local fallbackSuccess, fallbackResult = pcall(function()
+			return AvatarEditorService:SearchCatalog(fallbackParams)
+		end)
+		
+		if fallbackSuccess then
+			local pages = fallbackResult:GetCurrentPage()
+			for _, item in pairs(pages) do
+				local btn = Instance.new("ImageButton")
+				btn.Name = tostring(item.Id)
+				btn.Size = UDim2.new(0, 100, 0, 100)
+				btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+				btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+				btn.Parent = ResultsFrame
+				
+				if wornItems[item.Id] then
+					local s = Instance.new("UIStroke", btn)
+					s.Color = Color3.fromRGB(0,255,120) s.Thickness = 3 s.Enabled = true
+				end
+				
+				btn.MouseButton1Click:Connect(function() toggleItem(item.Id, btn) end)
+			end
+			print("[AdvancedSearch]: Fallback search found " .. #pages .. " items")
 		else
-			-- Also check for items without the Catalog_ prefix (for compatibility)
-			for _, child in pairs(character:GetChildren()) do
-				if child:IsA("Accessory") and child.Name == tostring(assetId) then
-					child:Destroy()
-					print("✅ Removed accessory: " .. assetId .. " from " .. player.Name)
+			warn("[AdvancedSearch]: Both advanced and fallback search failed")
+		end
+	end
+	
+	searchDebounce = false
+end
+
+-- Set up event connections
+if SearchBox then
+	SearchBox.FocusLost:Connect(function(enter) 
+		if enter then 
+			performSearch() 
+		end 
+	end)
+end
+
+if SearchBtn then 
+	SearchBtn.MouseButton1Click:Connect(performSearch) 
+end
+
+-- SKIN COLOR HANDLING
+local function applySkinColor()
+	if not SkinHexBox then return end
+	
+	local hexColor = SkinHexBox.Text:gsub("%s", "") -- Remove whitespace
+	
+	if hexColor == "" then
+		-- Empty textbox, reset to default skin color
+		ChangeSkinColorEvent:FireServer("")
+	else
+		-- Remove # if present
+		hexColor = hexColor:gsub("#", "")
+		
+		-- Check if it's a valid hex (3 or 6 characters)
+		if #hexColor == 3 or #hexColor == 6 then
+			local isValidHex = true
+			for char in hexColor:gmatch(".") do
+				if not char:match("[0-9a-fA-F]") then
+					isValidHex = false
 					break
 				end
 			end
-		end
-		
-	elseif action == "ClearAll" then
-		-- Remove all catalog items (with Catalog_ prefix)
-		for _, child in pairs(character:GetChildren()) do
-			if string.find(child.Name, "Catalog_") then 
-				child:Destroy() 
+			
+			if isValidHex then
+				ChangeSkinColorEvent:FireServer(hexColor)
 			end
 		end
-		
-		-- Also remove ALL accessories, clothing, and other avatar items
-		for _, child in pairs(character:GetChildren()) do
-			if child:IsA("Accessory") or child:IsA("Clothing") or child:IsA("ShirtGraphic") or child:IsA("BodyColors") or child:IsA("CharacterMesh") then
-				child:Destroy()
-			end
-		end
-		
-		-- Reset face to default
-		if character:FindFirstChild("Head") then
-			local face = character.Head:FindFirstChild("face")
-			if face then
-				face.Texture = "rbxasset://textures/face.png"
-			end
-		end
-		
-		print("✅ Cleared all avatar items from " .. player.Name)
 	end
-end)
--- Ready --
+end
+
+-- Apply skin color when textbox focus is lost
+if SkinHexBox then
+	SkinHexBox.FocusLost:Connect(function(enter)
+		if enter then
+			applySkinColor()
+		end
+	end)
+end
+	
