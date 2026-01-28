@@ -1,39 +1,95 @@
-  20:19:04.204  JointsService is deprecated, but an instance was added to JointsService: JointsService.Weld   -  Studio
-  20:19:04.258  Remote event invocation discarded event for RobloxReplicatedStorage.SendLikelySpeakingUsers; did you forget to implement OnClientEvent? (1 events dropped)  -  Studio
-  20:19:05.573   ▶ Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset. (x3)  -  Studio
-  20:19:05.595   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x13)  -  Studio
-  20:19:05.600   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:19:04.298  Icon is not a valid member of Folder "Workspace.TopbarPlus"  -  Klien - READ_ME:30
-  20:19:04.298  Stack Begin  -  Studio
-  20:19:04.298  Script 'Workspace.TopbarPlus.READ_ME', Line 30  -  Studio - READ_ME:30
-  20:19:04.298  Stack End  -  Studio
-  20:19:05.716  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:19:06.863  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
-  20:19:06.863  Stack Begin  -  Studio
-  20:19:06.864  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
-  20:19:06.864  Stack End  -  Studio
-  20:19:06.864  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
-  20:19:06.864  Stack Begin  -  Studio
-  20:19:06.864  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
-  20:19:06.864  Stack End  -  Studio
-  20:19:07.114   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:19:07.114  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:19:07.140  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:19:07.203   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x2)  -  Studio
-  20:19:07.394  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Studio
-  20:19:07.394  Stack Begin  -  Studio
-  20:19:07.395  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio
-  20:19:07.395  Stack End  -  Studio
-  20:19:07.395  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Studio
-  20:19:07.395  Stack Begin  -  Studio
-  20:19:07.395  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio
-  20:19:07.396  Stack End  -  Studio
-  20:19:08.025   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:19:08.026  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:19:08.026  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:19:09.091  WowClippy v4 Loaded Successfully!  -  Klien
-  20:19:10.166   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x40)  -  Studio
-  20:19:12.392  Infinite yield possible on 'Avatar:WaitForChild("FrameSearch")'  -  Studio
-  20:19:12.392  Stack Begin  -  Studio
-  20:19:12.392  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 13  -  Studio - CatalogLocalLogic:13
-  20:19:12.392  Stack End  -  Studio
+print("DEBUG: Script Starting...")
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+print("DEBUG: Waiting for Remote Events...")
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+print("DEBUG: Searching for ScreenGui 'Avatar'...")
+local MainGui = PlayerGui:WaitForChild("Avatar")
+print("DEBUG: Found MainGui: " .. MainGui.Name)
+
+-- This is where your error was happening. I added a 5-second timeout and print.
+local FrameSearch = MainGui:WaitForChild("FrameSearch", 5)
+if not FrameSearch then
+    warn("DEBUG ERROR: FrameSearch NOT FOUND inside Avatar! Check your hierarchy names.")
+    return
+end
+print("DEBUG: Found FrameSearch")
+
+local SearchBox = FrameSearch:WaitForChild("Search", 5)
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame", 5)
+print("DEBUG: UI Elements mapped. SearchBox: " .. tostring(SearchBox ~= nil))
+
+-- Mapping for Limbs, Dynamic Faces, and Layered Clothing
+local TAG_DATA = {
+    ["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
+    ["shoe"] = {Enum.AvatarAssetType.LeftShoeAccessory, Enum.AvatarAssetType.RightShoeAccessory},
+    ["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
+    ["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
+    ["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
+    ["bundle"] = {Enum.AvatarAssetType.Bundle}
+}
+
+local function performSearch()
+    print("DEBUG: Search function triggered for: " .. SearchBox.Text)
+    local text = SearchBox.Text:lower()
+    
+    -- Clear results
+    local clearedCount = 0
+    for _, v in pairs(ResultsFrame:GetChildren()) do
+        if v:IsA("ImageButton") then v:Destroy() clearedCount += 1 end
+    end
+    print("DEBUG: Cleared " .. clearedCount .. " old buttons")
+
+    local selectedTypes = {
+        Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, 
+        Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
+        Enum.AvatarAssetType.JacketAccessory, Enum.AvatarAssetType.ShoesAccessory
+    }
+    
+    for tag, types in pairs(TAG_DATA) do
+        if text:find(tag) then
+            selectedTypes = types
+            print("DEBUG: Tag detected! Switched search category to: " .. tag)
+            break
+        end
+    end
+
+    local params = CatalogSearchParams.new()
+    params.SearchKeyword = text
+    params.AssetTypes = selectedTypes
+
+    print("DEBUG: Calling AvatarEditorService...")
+    local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+    
+    if success and result then
+        local items = result:GetCurrentPage()
+        print("DEBUG: Search Success! Found " .. #items .. " items.")
+        
+        for i, item in pairs(items) do
+            local btn = Instance.new("ImageButton")
+            btn.Name = tostring(item.Id)
+            btn.Size = UDim2.new(0, 90, 0, 90)
+            btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+            btn.Parent = ResultsFrame
+            
+            btn.MouseButton1Click:Connect(function()
+                print("DEBUG: Button Clicked! ID: " .. item.Id)
+                EquipEvent:FireServer(item.Id, "Equip")
+            end)
+        end
+    else
+        warn("DEBUG ERROR: Catalog Search API Failed!")
+    end
+end
+
+SearchBox.FocusLost:Connect(function(enter)
+    print("DEBUG: SearchBox FocusLost. Enter pressed: " .. tostring(enter))
+    if enter then performSearch() end
+end)
