@@ -1,114 +1,90 @@
-local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
+local InsertService = game:GetService("InsertService")
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
-local FrameSearch = script.Parent:WaitForChild("FrameSearch")
-local FrameSideBar = script.Parent:WaitForChild("FrameSideBar")
-
-local SearchBox = FrameSearch:WaitForChild("Search")
-local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame")
-local StringsBox = FrameSideBar:FindFirstChild("Strings")
-local SkinHexBox = FrameSideBar:FindFirstChild("skinhex")
-
-local wornItems = {}
-local searchDebounce = false
-
--- Base36 Helper
-local function toBase36(n)
-	local chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-	n = tonumber(n) or 0
-	local res = ""
-	repeat
-		local r = n % 36
-		res = chars:sub(r+1, r+1) .. res
-		n = math.floor(n / 36)
-	until n == 0
-	return res
+-- Helper to get the AssetType from an ID (Crucial for HumanoidDescription)
+local function getAssetType(assetId)
+	local success, info = pcall(function()
+		return game:GetService("MarketplaceService"):GetProductInfo(assetId)
+	end)
+	return success and info.AssetTypeId or nil
 end
 
-local function updateStringsUI()
-	local t = {}
-	for id, _ in pairs(wornItems) do table.insert(t, toBase36(id)) end
-	if StringsBox then StringsBox.Text = table.concat(t, "-") end
-end
+EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
 
-local function toggleItem(assetId, button)
-	if wornItems[assetId] then
-		wornItems[assetId] = nil
-		if button:FindFirstChild("UIStroke") then button.UIStroke.Enabled = false end
-		EquipEvent:FireServer(assetId, "Remove")
-	else
-		wornItems[assetId] = true
-		local s = button:FindFirstChild("UIStroke") or Instance.new("UIStroke", button)
-		s.Color = Color3.fromRGB(0, 255, 120)
-		s.Thickness = 3
-		s.Enabled = true
-		EquipEvent:FireServer(assetId, "Equip")
-	end
-	updateStringsUI()
-end
+	-- Get current description or create new one
+	local description = humanoid:GetAppliedDescription() or Instance.new("HumanoidDescription")
 
--- Tag Parsing Logic
-local function parseSearchTags(searchText)
-	local activeTypes = {}
-	local cleanText = searchText:lower()
-	
-	local mappings = {
-		["hair"] = {Enum.AvatarAssetType.HairAccessory},
-		["hat"] = {Enum.AvatarAssetType.Hat},
-		["face"] = {Enum.AvatarAssetType.Face},
-		["shirt"] = {Enum.AvatarAssetType.Shirt},
-		["pants"] = {Enum.AvatarAssetType.Pants},
-		["back"] = {Enum.AvatarAssetType.BackAccessory},
-		["shoulder"] = {Enum.AvatarAssetType.ShoulderAccessory}
-	}
-	
-	for tag, enums in pairs(mappings) do
-		if cleanText:find(tag) then
-			for _, e in pairs(enums) do table.insert(activeTypes, e) end
-			cleanText = cleanText:gsub(tag, "")
+	if action == "Equip" then
+		local assetType = getAssetType(assetId)
+		if not assetType then return end
+
+		-- 1. Handle Clothing & Faces via Description
+		-- Mapping AssetType IDs to HumanoidDescription properties
+		local typeMap = {
+			[2] = "TShirt", [11] = "Shirt", [12] = "Pants", [18] = "Face",
+			[27] = "Torso", [28] = "RightArm", [29] = "LeftArm", [30] = "LeftLeg", [31] = "RightLeg",
+			[61] = "FrontAccessory", [41] = "Hat", [42] = "HairAccessory", 
+			-- Layered Clothing
+			[64] = "BackAccessory", [65] = "WaistAccessory", [66] = "ClimbAnimation",
+			[73] = "MoodAnimation", [76] = "FaceAccessory", [77] = "ChinnerAccessory"
+		}
+
+		-- Special Handling for Accessories (allowing multiples)
+		local accessoryTypes = {8, 41, 42, 43, 44, 45, 46} -- Accessories
+		local isAccessory = table.find(accessoryTypes, assetType)
+
+		if isAccessory then
+			local currentAccessories = description:GetAccessories(true)
+			table.insert(currentAccessories, {
+				AssetId = assetId,
+				Order = #currentAccessories + 1,
+				AccessoryType = Enum.AccessoryType.Unknown -- Engine auto-detects
+			})
+			description:SetAccessories(currentAccessories, true)
+		else
+			-- Handle Limbs, Clothes, and Faces
+			local prop = typeMap[assetType]
+			if prop then
+				description[prop] = assetId
+			end
 		end
-	end
-	
-	-- Default types if no tags used
-	if #activeTypes == 0 then
-		activeTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants}
-	end
-	
-	return activeTypes, cleanText:match("^%s*(.-)%s*$") -- Trimmed text
-end
 
-local function performSearch()
-	if searchDebounce then return end
-	searchDebounce = true
-	
-	for _, c in pairs(ResultsFrame:GetChildren()) do if c:IsA("ImageButton") then c:Destroy() end end
-	
-	local assetTypes, query = parseSearchTags(SearchBox.Text)
-	local params = CatalogSearchParams.new()
-	params.SearchKeyword = query
-	params.AssetTypes = assetTypes
-	
-	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
-	
-	if success then
-		local count = 0
-		local pages = result:GetCurrentPage()
-		for _, item in pairs(pages) do
-			if count >= 60 then break end -- Limit results for performance
-			local btn = Instance.new("ImageButton")
-			btn.Name = tostring(item.Id)
-			btn.Size = UDim2.new(0, 100, 0, 100)
-			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
-			btn.Parent = ResultsFrame
-			btn.MouseButton1Click:Connect(function() toggleItem(item.Id, btn) end)
-			count += 1
-		end
-	end
-	searchDebounce = false
-end
+		-- Apply the changes
+		local success, err = pcall(function()
+			humanoid:ApplyDescription(description)
+		end)
+		if not success then warn("Failed to apply: " .. err) end
 
-SearchBox.FocusLost:Connect(function(enter) if enter then performSearch() end end)
-SkinHexBox.FocusLost:Connect(function() ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end)
+	elseif action == "ClearAll" then
+		humanoid:ApplyDescription(Instance.new("HumanoidDescription"))
+	end
+end)
+
+-- Robust Skin Color Handler
+ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hexColor)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	
+	local desc = hum:GetAppliedDescription()
+	hexColor = hexColor:gsub("#", "")
+	local r = tonumber(hexColor:sub(1,2), 16)
+	local g = tonumber(hexColor:sub(3,4), 16)
+	local b = tonumber(hexColor:sub(5,6), 16)
+	
+	if r and g and b then
+		local color = Color3.fromRGB(r,g,b)
+		desc.HeadColor = color
+		desc.LeftArmColor = color
+		desc.RightArmColor = color
+		desc.LeftLegColor = color
+		desc.RightLegColor = color
+		desc.TorsoColor = color
+		hum:ApplyDescription(desc)
+	end
+end)
