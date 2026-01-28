@@ -1,86 +1,78 @@
-local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local AssetService = game:GetService("AssetService")
 
-local Player = Players.LocalPlayer
-local PlayerGui = Player:WaitForChild("PlayerGui")
-local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
-local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+local EquipEvent = ReplicatedStorage:FindFirstChild("EquipAssetEvent") or Instance.new("RemoteEvent", ReplicatedStorage)
+EquipEvent.Name = "EquipAssetEvent"
 
--- [[ UI HIERARCHY ]]
-local MainGui = PlayerGui:WaitForChild("Avatar")
-local FrameSearch = MainGui:WaitForChild("FrameSearch")
-local FrameSideBar = MainGui:WaitForChild("FrameSideBar")
+local ChangeSkinColorEvent = ReplicatedStorage:FindFirstChild("ChangeSkinColor") or Instance.new("RemoteEvent", ReplicatedStorage)
+ChangeSkinColorEvent.Name = "ChangeSkinColor"
 
-local SearchBox = FrameSearch:WaitForChild("Search")
-local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame")
+-- Helper: Convert Hex to Color3
+local function toColor3(hex)
+	hex = hex:gsub("#","")
+	local r = tonumber(hex:sub(1,2), 16)
+	local g = tonumber(hex:sub(3,4), 16)
+	local b = tonumber(hex:sub(5,6), 16)
+	return (r and g and b) and Color3.fromRGB(r,g,b) or nil
+end
 
--- Sidebar (Your specific names)
-local StringsBox = FrameSideBar:WaitForChild("Strings")
-local ApplyBtn = FrameSideBar:WaitForChild("Apply")
-local ClearABtn = FrameSideBar:WaitForChild("ClearA")
-local SkinHexBox = FrameSideBar:WaitForChild("skinhex")
-
--- [[ SEARCH LOGIC ]]
-local function performSearch()
-	local text = SearchBox.Text
-	if text == "" then return end
-	
-	for _, v in pairs(ResultsFrame:GetChildren()) do
-		if v:IsA("ImageButton") then v:Destroy() end
-	end
-
-	local params = CatalogSearchParams.new()
-	params.SearchKeyword = text
-	-- Valid Enums for modern Roblox
-	params.AssetTypes = {
-		Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory,
-		Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants,
-		Enum.AvatarAssetType.Shoes, Enum.AvatarAssetType.Jacket
-	}
-	
-	local success, result = pcall(function() 
-		return AvatarEditorService:SearchCatalog(params) 
-	end)
-	
-	if success and result then
-		if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
-			local gl = Instance.new("UIGridLayout", ResultsFrame)
-			gl.CellSize = UDim2.new(0, 90, 0, 90)
+-- Helper: Apply Bundle (Korblox)
+local function applyBundle(hum, bundleId)
+	local s, details = pcall(function() return AssetService:GetBundleDetailsAsync(bundleId) end)
+	if s and details then
+		local desc = hum:GetAppliedDescription()
+		for _, item in pairs(details.Items) do
+			if item.Type == "Asset" then
+				local info = MarketplaceService:GetProductInfo(item.Id)
+				if info.AssetTypeId == 27 then desc.Torso = item.Id
+				elseif info.AssetTypeId == 28 then desc.RightArm = item.Id
+				elseif info.AssetTypeId == 29 then desc.LeftArm = item.Id
+				elseif info.AssetTypeId == 30 then desc.LeftLeg = item.Id
+				elseif info.AssetTypeId == 31 then desc.RightLeg = item.Id
+				end
+			end
 		end
-
-		for _, item in pairs(result:GetCurrentPage()) do
-			local btn = Instance.new("ImageButton")
-			btn.Name = tostring(item.Id)
-			btn.Size = UDim2.new(0, 90, 0, 90)
-			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
-			btn.Parent = ResultsFrame
-			btn.MouseButton1Click:Connect(function()
-				EquipEvent:FireServer(item.Id, "Equip")
-			end)
-		end
+		hum:ApplyDescription(desc)
 	end
 end
 
--- [[ CONNECTIONS ]]
-ApplyBtn.MouseButton1Click:Connect(function()
-	local code = StringsBox.Text
-	if code ~= "" then
-		local id = tonumber(code, 36)
-		if id then EquipEvent:FireServer(id, "Equip") end
+EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	
+	if action == "ClearAll" then
+		hum:ApplyDescription(Instance.new("HumanoidDescription"))
+		return
+	end
+
+	local desc = hum:GetAppliedDescription()
+	local s, info = pcall(function() return MarketplaceService:GetProductInfo(assetId) end)
+	
+	if s and info then
+		if info.AssetTypeId == 37 then -- Bundle
+			applyBundle(hum, assetId)
+		elseif tostring(info.Name):find("Accessory") or info.AssetTypeId == 41 or info.AssetTypeId == 8 then
+			local accs = desc:GetAccessories(true)
+			table.insert(accs, {AssetId = assetId, Order = #accs+1, AccessoryType = Enum.AccessoryType.Unknown})
+			desc:SetAccessories(accs, true)
+		elseif info.AssetTypeId == 11 then desc.Shirt = assetId
+		elseif info.AssetTypeId == 12 then desc.Pants = assetId
+		end
+		hum:ApplyDescription(desc)
 	end
 end)
 
-ClearABtn.MouseButton1Click:Connect(function()
-	EquipEvent:FireServer(nil, "ClearAll")
-end)
-
-SkinHexBox.FocusLost:Connect(function(enter)
-	if SkinHexBox.Text ~= "" then
-		ChangeSkinColorEvent:FireServer(SkinHexBox.Text)
+ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hex)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local color = toColor3(hex)
+	if hum and color then
+		local desc = hum:GetAppliedDescription()
+		desc.HeadColor, desc.TorsoColor = color, color
+		desc.LeftArmColor, desc.RightArmColor = color, color
+		desc.LeftLegColor, desc.RightLegColor = color, color
+		hum:ApplyDescription(desc)
 	end
-end)
-
-SearchBox.FocusLost:Connect(function(enter)
-	if enter then performSearch() end
 end)
