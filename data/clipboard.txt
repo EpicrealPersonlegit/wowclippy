@@ -1,115 +1,114 @@
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local InsertService = game:GetService("InsertService")
+
 local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
 local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
 
--- Helper: Safe Hex to Color3
-local function hexToColor3(hex)
-	hex = hex:gsub("#", "")
-	if #hex == 3 then
-		hex = hex:sub(1,1):rep(2)..hex:sub(2,2):rep(2)..hex:sub(3,3):rep(2)
-	end
-	if #hex ~= 6 then return nil end
-	
-	local r = tonumber(hex:sub(1,2), 16)
-	local g = tonumber(hex:sub(3,4), 16)
-	local b = tonumber(hex:sub(5,6), 16)
-	
-	if r and g and b then
-		return Color3.fromRGB(r, g, b)
-	end
-	return nil
+local FrameSearch = script.Parent:WaitForChild("FrameSearch")
+local FrameSideBar = script.Parent:WaitForChild("FrameSideBar")
+
+local SearchBox = FrameSearch:WaitForChild("Search")
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame")
+local StringsBox = FrameSideBar:FindFirstChild("Strings")
+local SkinHexBox = FrameSideBar:FindFirstChild("skinhex")
+
+local wornItems = {}
+local searchDebounce = false
+
+-- Base36 Helper
+local function toBase36(n)
+	local chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+	n = tonumber(n) or 0
+	local res = ""
+	repeat
+		local r = n % 36
+		res = chars:sub(r+1, r+1) .. res
+		n = math.floor(n / 36)
+	until n == 0
+	return res
 end
 
--- Handle Skin Color
-ChangeSkinColorEvent.OnServerEvent:Connect(function(player, hexColor)
-	local character = player.Character or player.CharacterAdded:Wait()
-	if not character then return end
-	
-	local color = hexToColor3(hexColor)
-	local bodyColors = character:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", character)
-	
-	if color then
-		bodyColors.HeadColor3 = color
-		bodyColors.LeftArmColor3 = color
-		bodyColors.RightArmColor3 = color
-		bodyColors.LeftLegColor3 = color
-		bodyColors.RightLegColor3 = color
-		bodyColors.TorsoColor3 = color
-		print("✅ Applied Color3 to " .. player.Name)
+local function updateStringsUI()
+	local t = {}
+	for id, _ in pairs(wornItems) do table.insert(t, toBase36(id)) end
+	if StringsBox then StringsBox.Text = table.concat(t, "-") end
+end
+
+local function toggleItem(assetId, button)
+	if wornItems[assetId] then
+		wornItems[assetId] = nil
+		if button:FindFirstChild("UIStroke") then button.UIStroke.Enabled = false end
+		EquipEvent:FireServer(assetId, "Remove")
 	else
-		bodyColors:Destroy() -- Resets to default
+		wornItems[assetId] = true
+		local s = button:FindFirstChild("UIStroke") or Instance.new("UIStroke", button)
+		s.Color = Color3.fromRGB(0, 255, 120)
+		s.Thickness = 3
+		s.Enabled = true
+		EquipEvent:FireServer(assetId, "Equip")
 	end
-end)
+	updateStringsUI()
+end
 
--- Handle Equipping
-EquipEvent.OnServerEvent:Connect(function(player, assetId, action)
-	local character = player.Character or player.CharacterAdded:Wait()
-	if not character then return end
-
-	if action == "Equip" then
-		local success, model = pcall(function()
-			return InsertService:LoadAsset(assetId)
-		end)
-		
-		if not success or not model then
-			warn("❌ Permission Error: Cannot load Asset " .. assetId .. ". Is it 'Free' or owned by the Game Owner?")
-			return
-		end
-		
-		-- Process all items inside the loaded model (Handles Packages/Bundles)
-		for _, asset in pairs(model:GetChildren()) do
-			asset.Name = "Catalog_" .. assetId
-			
-			if asset:IsA("Accessory") then
-				-- Remove oldest of same type if > 5 (as per your logic)
-				local count = 0
-				for _, item in pairs(character:GetChildren()) do
-					if item:IsA("Accessory") and item.AccessoryType == asset.AccessoryType then count += 1 end
-				end
-				if count >= 5 then 
-					for _, item in pairs(character:GetChildren()) do 
-						if item:IsA("Accessory") and item.AccessoryType == asset.AccessoryType then 
-							item:Destroy() break 
-						end 
-					end 
-				end
-				asset.Parent = character
-				
-			elseif asset:IsA("Clothing") or asset:IsA("ShirtGraphic") then
-				for _, c in pairs(character:GetChildren()) do
-					if c.ClassName == asset.ClassName then c:Destroy() end
-				end
-				asset.Parent = character
-				
-			elseif asset:IsA("Decal") then
-				local head = character:FindFirstChild("Head")
-				if head and head:FindFirstChild("face") then head.face.Texture = asset.Texture end
-				
-			elseif asset:IsA("CharacterMesh") or asset:IsA("BodyColors") then
-				for _, c in pairs(character:GetChildren()) do
-					if c.ClassName == asset.ClassName then c:Destroy() end
-				end
-				asset.Parent = character
-			end
-		end
-		model:Destroy()
-		
-	elseif action == "Remove" then
-		for _, child in pairs(character:GetChildren()) do
-			if child.Name == "Catalog_" .. assetId or (child:IsA("Accessory") and child.Name == tostring(assetId)) then
-				child:Destroy()
-			end
-		end
-		
-	elseif action == "ClearAll" then
-		for _, child in pairs(character:GetChildren()) do
-			if child:IsA("Accessory") or child:IsA("Clothing") or child:IsA("CharacterMesh") or child:IsA("BodyColors") then
-				child:Destroy()
-			end
-		end
-		if character:FindFirstChild("Head") and character.Head:FindFirstChild("face") then
-			character.Head.face.Texture = "rbxasset://textures/face.png"
+-- Tag Parsing Logic
+local function parseSearchTags(searchText)
+	local activeTypes = {}
+	local cleanText = searchText:lower()
+	
+	local mappings = {
+		["hair"] = {Enum.AvatarAssetType.HairAccessory},
+		["hat"] = {Enum.AvatarAssetType.Hat},
+		["face"] = {Enum.AvatarAssetType.Face},
+		["shirt"] = {Enum.AvatarAssetType.Shirt},
+		["pants"] = {Enum.AvatarAssetType.Pants},
+		["back"] = {Enum.AvatarAssetType.BackAccessory},
+		["shoulder"] = {Enum.AvatarAssetType.ShoulderAccessory}
+	}
+	
+	for tag, enums in pairs(mappings) do
+		if cleanText:find(tag) then
+			for _, e in pairs(enums) do table.insert(activeTypes, e) end
+			cleanText = cleanText:gsub(tag, "")
 		end
 	end
-end)
+	
+	-- Default types if no tags used
+	if #activeTypes == 0 then
+		activeTypes = {Enum.AvatarAssetType.Hat, Enum.AvatarAssetType.HairAccessory, Enum.AvatarAssetType.Shirt, Enum.AvatarAssetType.Pants}
+	end
+	
+	return activeTypes, cleanText:match("^%s*(.-)%s*$") -- Trimmed text
+end
+
+local function performSearch()
+	if searchDebounce then return end
+	searchDebounce = true
+	
+	for _, c in pairs(ResultsFrame:GetChildren()) do if c:IsA("ImageButton") then c:Destroy() end end
+	
+	local assetTypes, query = parseSearchTags(SearchBox.Text)
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = query
+	params.AssetTypes = assetTypes
+	
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
+	if success then
+		local count = 0
+		local pages = result:GetCurrentPage()
+		for _, item in pairs(pages) do
+			if count >= 60 then break end -- Limit results for performance
+			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
+			btn.Size = UDim2.new(0, 100, 0, 100)
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			btn.MouseButton1Click:Connect(function() toggleItem(item.Id, btn) end)
+			count += 1
+		end
+	end
+	searchDebounce = false
+end
+
+SearchBox.FocusLost:Connect(function(enter) if enter then performSearch() end end)
+SkinHexBox.FocusLost:Connect(function() ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end)
