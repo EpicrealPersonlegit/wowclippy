@@ -1,28 +1,99 @@
-  20:14:22.967  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:14:23.915  JointsService is deprecated, but an instance was added to JointsService: JointsService.Weld   -  Studio
-  20:14:25.289   ▶ Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset. (x2)  -  Studio
-  20:14:25.321   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x13)  -  Studio
-  20:14:25.349   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:14:24.021  Icon is not a valid member of Folder "Workspace.TopbarPlus"  -  Klien - READ_ME:30
-  20:14:24.021  Stack Begin  -  Studio
-  20:14:24.021  Script 'Workspace.TopbarPlus.READ_ME', Line 30  -  Studio - READ_ME:30
-  20:14:24.021  Stack End  -  Studio
-  20:14:25.816   ▶ Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses (x2)  -  Studio
-  20:14:26.869  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - LocalScript:73
-  20:14:26.869  Stack Begin  -  Studio
-  20:14:26.870  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.LocalScript', Line 73  -  Studio - LocalScript:73
-  20:14:26.870  Stack End  -  Studio
-  20:14:26.870  FocusLost is not a valid member of Folder "Players.fijisumm.PlayerGui.Load.Info.OnID"  -  Klien - Handler:4
-  20:14:26.870  Stack Begin  -  Studio
-  20:14:26.870  Script 'Players.fijisumm.PlayerGui.Load.Info.OnID.Handler', Line 4  -  Studio - Handler:4
-  20:14:26.870  Stack End  -  Studio
-  20:14:28.086  WowClippy v4 Loaded Successfully!  -  Klien
-  20:14:28.360   ▶ Failed to load sound rbxassetid://0: Request asset was not found (x2)  -  Studio
-  20:14:28.361  Failed to load sound rbxassetid://118679875334899: User is not authorized to access Asset.  -  Studio
-  20:14:28.372  Pengalaman virtual tidak memiliki izin akses untuk menggunakan id aset 118679875334899. Klik untuk membagikan akses  -  Studio
-  20:14:28.422   ▶ Failed to load sound rbxassetid://201887209: Asset is not approved for the requester (x42)  -  Studio
-  20:14:38.882  Players.fijisumm.PlayerScripts.CatalogLocalLogic:25: ❌ UI Hierarchy Error: Check if FrameSearch and FrameSideBar are inside Avatar  -  Klien - CatalogLocalLogic:25
-  20:14:38.883  Stack Begin  -  Studio
-  20:14:38.883  Script 'Players.fijisumm.PlayerScripts.CatalogLocalLogic', Line 25  -  Studio - CatalogLocalLogic:25
-  20:14:38.884  Stack End  -  Studio
-  20:15:12.464  Disconnect from 128.116.54.33|57121  -  Studio
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local EquipEvent = ReplicatedStorage:WaitForChild("EquipAssetEvent")
+local ChangeSkinColorEvent = ReplicatedStorage:WaitForChild("ChangeSkinColor")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- 1. Correct Pathing based on your description
+local MainGui = PlayerGui:WaitForChild("Avatar")
+local FrameSearch = MainGui:WaitForChild("FrameSearch")
+local FrameSideBar = MainGui:WaitForChild("FrameSideBar")
+
+-- 2. Finding elements inside FrameSearch
+local SearchBox = FrameSearch:WaitForChild("Search") -- Your TextBox
+local ResultsFrame = FrameSearch:WaitForChild("AvatarFrame") -- Your ScrollingFrame/Frame
+local SkinHexBox = FrameSideBar:FindFirstChild("skinhex")
+
+-- Ensure we have a Layout for the buttons
+if not ResultsFrame:FindFirstChildOfClass("UIGridLayout") then
+	local layout = Instance.new("UIGridLayout", ResultsFrame)
+	layout.CellSize = UDim2.new(0, 90, 0, 90)
+	layout.CellPadding = UDim2.new(0, 5, 0, 5)
+end
+
+local TAG_DATA = {
+	["jacket"] = {Enum.AvatarAssetType.JacketAccessory},
+	["shoe"] = {Enum.AvatarAssetType.LeftShoeAccessory, Enum.AvatarAssetType.RightShoeAccessory},
+	["face"] = {Enum.AvatarAssetType.Face, Enum.AvatarAssetType.DynamicHead},
+	["arm"] = {Enum.AvatarAssetType.LeftArm, Enum.AvatarAssetType.RightArm},
+	["leg"] = {Enum.AvatarAssetType.LeftLeg, Enum.AvatarAssetType.RightLeg},
+	["bundle"] = {Enum.AvatarAssetType.Bundle}
+}
+
+local function performSearch()
+	local text = SearchBox.Text:lower()
+	if text == "" then return end
+	
+	-- Clear old buttons
+	for _, v in pairs(ResultsFrame:GetChildren()) do
+		if v:IsA("ImageButton") then v:Destroy() end
+	end
+
+	local selectedTypes = {
+		Enum.AvatarAssetType.Hat, 
+		Enum.AvatarAssetType.HairAccessory, 
+		Enum.AvatarAssetType.Shirt, 
+		Enum.AvatarAssetType.Pants,
+		Enum.AvatarAssetType.JacketAccessory,
+		Enum.AvatarAssetType.ShoesAccessory
+	}
+	
+	for tag, types in pairs(TAG_DATA) do
+		if text:find(tag) then
+			selectedTypes = types
+			break
+		end
+	end
+
+	local params = CatalogSearchParams.new()
+	params.SearchKeyword = text
+	params.AssetTypes = selectedTypes
+
+	local success, result = pcall(function() return AvatarEditorService:SearchCatalog(params) end)
+	
+	if success and result then
+		local items = result:GetCurrentPage()
+		
+		for _, item in pairs(items) do
+			local btn = Instance.new("ImageButton")
+			btn.Name = tostring(item.Id)
+			btn.Size = UDim2.new(0, 90, 0, 90)
+			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+			-- Use rbxthumb for fast loading
+			btn.Image = "rbxthumb://type=Asset&id=" .. item.Id .. "&w=150&h=150"
+			btn.Parent = ResultsFrame
+			
+			btn.MouseButton1Click:Connect(function()
+				EquipEvent:FireServer(item.Id, "Equip")
+			end)
+		end
+	else
+		warn("Catalog search failed or returned no results.")
+	end
+end
+
+-- Connect the SearchBox
+SearchBox.FocusLost:Connect(function(enter)
+	if enter then performSearch() end
+end)
+
+-- Connect Skin Color
+if SkinHexBox then
+	SkinHexBox.FocusLost:Connect(function(enter)
+		if enter then ChangeSkinColorEvent:FireServer(SkinHexBox.Text) end
+	end)
+end
