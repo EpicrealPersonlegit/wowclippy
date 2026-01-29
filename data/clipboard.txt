@@ -1,60 +1,221 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local MarketplaceService = game:GetService("MarketplaceService")
-local AssetService = game:GetService("AssetService")
+local TweenService = game:GetService("TweenService")
 
-local EquipEvent = ReplicatedStorage:FindFirstChild("EquipAssetEvent") or Instance.new("RemoteEvent", ReplicatedStorage)
-EquipEvent.Name = "EquipAssetEvent"
-local SkinEvent = ReplicatedStorage:FindFirstChild("ChangeSkinColor") or Instance.new("RemoteEvent", ReplicatedStorage)
-SkinEvent.Name = "ChangeSkinColor"
+-- Reference to the original NameAndDescTag part
+local nameTagTemplate = ReplicatedStorage:FindFirstChild("NameAndDescTag")
 
-local function applyBundle(hum, id)
-    local s, res = pcall(function() return AssetService:GetBundleDetailsAsync(id) end)
-    if s and res then
-        local d = hum:GetAppliedDescription()
-        for _, v in pairs(res.Items) do
-            if v.Type == "Asset" then
-                local i = MarketplaceService:GetProductInfo(v.Id)
-                if i.AssetTypeId == 27 then d.Torso = v.Id
-                elseif i.AssetTypeId == 28 then d.RightArm = v.Id
-                elseif i.AssetTypeId == 29 then d.LeftArm = v.Id
-                elseif i.AssetTypeId == 30 then d.LeftLeg = v.Id
-                elseif i.AssetTypeId == 31 then d.RightLeg = v.Id
-                end
-            end
+if not nameTagTemplate then
+    warn("NameAndDescTag not found in ReplicatedStorage!")
+    return
+end
+
+-- Tween information
+local TWEEN_INFO = TweenInfo.new(
+    0.7, -- Duration
+    Enum.EasingStyle.CubicInOut, -- EasingStyle
+    Enum.EasingDirection.InOut, -- EasingDirection
+    0, -- RepeatCount
+    false, -- Reverses
+    0 -- DelayTime
+)
+
+-- Function to set transparency for all TextLabels in a BillboardGui
+local function setTextLabelsTransparency(billboardGui, transparency)
+    for _, child in billboardGui:GetChildren() do
+        if child:IsA("TextLabel") then
+            child.TextTransparency = transparency
         end
-        hum:ApplyDescription(d)
     end
 end
 
-EquipEvent.OnServerEvent:Connect(function(plr, id, action)
-    local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    if action == "ClearAll" then hum:ApplyDescription(Instance.new("HumanoidDescription")) return end
-
-    local s, info = pcall(function() return MarketplaceService:GetProductInfo(id) end)
-    if s and info then
-        local d = hum:GetAppliedDescription()
-        if info.AssetTypeId == 37 then applyBundle(hum, id)
-        elseif info.AssetTypeId == 11 then d.Shirt = id
-        elseif info.AssetTypeId == 12 then d.Pants = id
-        else
-            local accs = d:GetAccessories(true)
-            table.insert(accs, {AssetId = id, Order = #accs+1, AccessoryType = Enum.AccessoryType.Unknown})
-            d:SetAccessories(accs, true)
+-- Function to monitor player movement
+local function monitorPlayerMovement(character, nameTag)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+    
+    local billboardGui = nameTag:FindFirstChild("BillboardGui")
+    if not billboardGui then return end
+    
+    local isMoving = false
+    local lastPosition = head.Position
+    local moveThreshold = 0.1
+    
+    -- Set initial transparency
+    setTextLabelsTransparency(billboardGui, 0.3)
+    
+    -- Movement detection loop
+    local connection
+    connection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not humanoid or humanoid.Health <= 0 or not head.Parent then
+            connection:Disconnect()
+            return
         end
-        hum:ApplyDescription(d)
-    end
-end)
+        
+        local currentPosition = head.Position
+        local distance = (currentPosition - lastPosition).Magnitude
+        
+        -- Check if player is moving
+        local currentlyMoving = humanoid.MoveDirection.Magnitude > 0.1 or distance > moveThreshold
+        
+        if currentlyMoving and not isMoving then
+            -- Player started moving
+            isMoving = true
+            -- Move down and fade out
+            local targetPosition = currentPosition - Vector3.new(0, 0.5, 0)
+            local moveTween = TweenService:Create(nameTag, TWEEN_INFO, {Position = targetPosition})
+            moveTween:Play()
+            setTextLabelsTransparency(billboardGui, 0.7)
+        elseif not currentlyMoving and isMoving then
+            -- Player stopped moving
+            isMoving = false
+            -- Move up and fade in
+            local targetPosition = currentPosition
+            local moveTween = TweenService:Create(nameTag, TWEEN_INFO, {Position = targetPosition})
+            moveTween:Play()
+            setTextLabelsTransparency(billboardGui, 0.3)
+        end
+        
+        lastPosition = currentPosition
+    end)
+    
+    -- Clean up when character is removed
+    character.AncestryChanged:Connect(function()
+        if not character.Parent then
+            connection:Disconnect()
+        end
+    end)
+end
 
-SkinEvent.OnServerEvent:Connect(function(plr, hex)
-    local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    hex = hex:gsub("#","")
-    local r, g, b = tonumber(hex:sub(1,2), 16), tonumber(hex:sub(3,4), 16), tonumber(hex:sub(5,6), 16)
-    if r and g and b then
-        local d = hum:GetAppliedDescription()
-        local c = Color3.fromRGB(r,g,b)
-        d.HeadColor, d.TorsoColor, d.LeftArmColor, d.RightArmColor, d.LeftLegColor, d.RightLegColor = c, c, c, c, c, c
-        hum:ApplyDescription(d)
+-- Simple test function to create name tag immediately
+local function createNameTagForPlayer(player)
+    if not player.Character then return end
+    
+    local head = player.Character:FindFirstChild("Head")
+    if not head then return end
+    
+    -- Remove existing tag
+    local existingTag = player.Character:FindFirstChild("NameAndDescTag")
+    if existingTag then
+        existingTag:Destroy()
     end
-end)
+    
+    -- Create new tag
+    local nameTag = nameTagTemplate:Clone()
+    nameTag.Name = "NameAndDescTag"
+    nameTag.Parent = player.Character
+    nameTag.Position = head.Position
+    
+    -- Create weld
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = nameTag
+    weld.Part1 = head
+    weld.Parent = nameTag
+    
+    nameTag.CanCollide = false
+    nameTag.Anchored = false
+    
+    -- Update text and transparency
+    local billboardGui = nameTag:FindFirstChild("BillboardGui")
+    if billboardGui then
+        local originalNameLabel = billboardGui:FindFirstChild("originalName")
+        if originalNameLabel then
+            originalNameLabel.Text = "@" .. player.Name
+        end
+        setTextLabelsTransparency(billboardGui, 0.3)
+    end
+    
+    -- Start movement monitoring
+    task.spawn(function()
+        monitorPlayerMovement(player.Character, nameTag)
+    end)
+    
+    print("Created name tag for player: " .. player.Name)
+end
+
+-- Function to attach name tag to player's character
+local function attachNameTagToCharacter(character)
+    -- Find the head
+    local head = character:FindFirstChild("Head")
+    if not head then
+        return
+    end
+    
+    -- Check if character already has a name tag
+    local existingTag = character:FindFirstChild("NameAndDescTag")
+    if existingTag then
+        existingTag:Destroy()
+    end
+    
+    -- Clone the name tag template
+    local nameTag = nameTagTemplate:Clone()
+    nameTag.Name = "NameAndDescTag"
+    nameTag.Parent = character
+    
+    -- Position the name tag at head level
+    nameTag.Position = head.Position
+    
+    -- Create a weld to attach it to the head
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = nameTag
+    weld.Part1 = head
+    weld.Parent = nameTag
+    
+    -- Make sure the name tag doesn't collide
+    nameTag.CanCollide = false
+    nameTag.Anchored = false
+    
+    -- Update the originalName TextLabel with the player's name
+    local billboardGui = nameTag:FindFirstChild("BillboardGui")
+    if billboardGui then
+        local originalNameLabel = billboardGui:FindFirstChild("originalName")
+        if originalNameLabel then
+            -- Get the player from the character
+            local player = Players:GetPlayerFromCharacter(character)
+            if player then
+                originalNameLabel.Text = "@" .. player.Name
+            end
+        end
+        
+        -- Set initial transparency for all TextLabels
+        setTextLabelsTransparency(billboardGui, 0.3)
+    end
+    
+    -- Start monitoring player movement
+    task.spawn(function()
+        monitorPlayerMovement(character, nameTag)
+    end)
+end
+
+-- Function to handle player joining
+local function onPlayerAdded(player)
+    print("Player joined: " .. player.Name)
+    
+    -- Wait for character to spawn
+    player.CharacterAdded:Connect(function(character)
+        print("Character added for: " .. player.Name)
+        -- Wait a short time to ensure character is fully loaded
+        task.wait(0.5)
+        createNameTagForPlayer(player)
+    end)
+    
+    -- If player already has a character, attach immediately
+    if player.Character then
+        print("Character already exists for: " .. player.Name)
+        task.wait(0.5)
+        createNameTagForPlayer(player)
+    end
+end
+
+-- Connect to new players joining
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+-- Handle players already in the game
+for _, player in Players:GetPlayers() do
+    onPlayerAdded(player)
+end
+
+print("NameTagHandler script started")
