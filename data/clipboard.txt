@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local chatevent = ReplicatedStorage:WaitForChild("SubmitChatMessage")
 
 -- 1. Configuration
 local IDLE_OFFSET = Vector3.new(0, 2.5, 0)
@@ -97,7 +98,7 @@ local function setupNameTag(player, character)
 
 	-- Event-Driven Movement
 	local isWalking = false
-	
+
 	local runningConnection
 	runningConnection = humanoid.Running:Connect(function(speed)
 		if not distinctBillboardGui or not distinctBillboardGui.Parent then
@@ -111,7 +112,7 @@ local function setupNameTag(player, character)
 			applyState(distinctBillboardGui, isWalking)
 		end
 	end)
-	
+
 	print("Tag successfully applied to: " .. player.Name)
 end
 
@@ -126,6 +127,26 @@ local function onPlayerAdded(player)
 	if player.Character then
 		setupNameTag(player, player.Character)
 	end
+end
+
+if chatevent then
+	chatevent.OnServerEvent:Connect(function(player, message)
+		local character = player.Character
+		if not character then return end
+		local head = character:FindFirstChild("Head")
+		if not head then return end
+		local tag = head:FindFirstChild("NameAndDescTag")
+		if not tag then return end
+		local gui = tag:FindFirstChild("BillBoardGui", true)
+		local originalName = gui:FindFirstChild("originalName", true)
+		if originalName.Text == player.Name then
+		if gui.Enabled == true then
+			gui.Enabled = false
+			task.wait(5)
+			gui.Enabled = true
+		end
+		
+	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
