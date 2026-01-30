@@ -1,40 +1,45 @@
+local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-
 
 local function getChatcontGui()
     return playerGui:FindFirstChild("chatcont")
 end
 
-
+-- 1. Create the Icon
 local chatToggleIcon = Icon.new()
     :setName("Chat")
-	:setImage(16884178261, "Deselected")
-	:setImage(16086868447, "Selected")
+    :setImage(16884178261, "Deselected")
+    :setImage(16086868447, "Selected")
     :setLabel("Chat")
-    :bindEvent("selected", function()
-        local chatcontGui = getChatcontGui()
-        if chatcontGui then
-            chatcontGui.Enabled = not chatcontGui.Enabled
-        end
-    end)
 
-
-playerGui.ChildAdded:Connect(function(child)
-    if child.Name == "Chatcont" then
-        child.Enabled = false
-    end
+-- 2. Define the toggle logic in a way that works for both Selected and Deselected
+chatToggleIcon.selected:Connect(function()
+    local chatcontGui = getChatcontGui()
+    if chatcontGui then chatcontGui.Enabled = true end
 end)
 
+chatToggleIcon.deselected:Connect(function()
+    local chatcontGui = getChatcontGui()
+    if chatcontGui then chatcontGui.Enabled = false end
+end)
 
+-- 3. Initial State Setup
 local existingChatcont = getChatcontGui()
 if existingChatcont then
     existingChatcont.Enabled = false
 end
 
--- Wait a moment and then enable chat if it exists
-task.wait(1)
-local chatcontGui = getChatcontGui()
-if chatcontGui then
-    chatcontGui.Enabled = true
-end
+-- 4. The "Sync" Fix
+-- Instead of just enabling the GUI, we select the ICON.
+-- This enables the GUI via the 'selected' event AND prevents the double-click.
+task.delay(1, function()
+    chatToggleIcon:setSelected(true)
+end)
+
+-- Handle GUI being added late
+playerGui.ChildAdded:Connect(function(child)
+    if child.Name == "chatcont" then
+        child.Enabled = chatToggleIcon.isSelected -- Sync with current icon state
+    end
+end)
