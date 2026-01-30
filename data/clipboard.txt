@@ -1,150 +1,40 @@
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- 1. Configuration / Constants
-local IDLE_OFFSET = Vector3.new(0, 2, 0) -- High up when standing
-local WALK_OFFSET = Vector3.new(0, 1.5, 0) -- Lower down when walking
-local IDLE_TRANSPARENCY = 0
-local WALK_TRANSPARENCY = 0.5
-local TWEEN_TIME = 0.5
 
-local nameTagTemplate = ReplicatedStorage:WaitForChild("NameAndDescTag", 5)
-
-if not nameTagTemplate then
-    warn("CRITICAL: NameAndDescTag not found in ReplicatedStorage!")
-    return
+local function getChatcontGui()
+    return playerGui:FindFirstChild("chatcont")
 end
 
--- 2. Tween Info
-local tweenInfo = TweenInfo.new(
-    TWEEN_TIME,
-    Enum.EasingStyle.Quad,
-    Enum.EasingDirection.Out
-)
 
--- 3. Helper Function to Tween Text Transparency
-local function tweenGuiTransparency(billboardGui, targetTransparency, targetOffset)
-    -- Tween the position of the GUI (StudsOffset)
-    TweenService:Create(billboardGui, tweenInfo, {StudsOffset = targetOffset}):Play()
-
-    -- Tween the transparency of all text labels inside
-    for _, child in ipairs(billboardGui:GetDescendants()) do
-        if child:IsA("TextLabel") then
-            TweenService:Create(child, tweenInfo, {TextTransparency = targetTransparency}):Play()
-            -- Optional: If you use TextStroke, tween that too
-            TweenService:Create(child, tweenInfo, {TextStrokeTransparency = targetTransparency == 1 and 1 or 0.8}):Play() 
-        end
-    end
-end
-
--- 4. Movement Monitor Logic
-local function monitorMovement(character, billboardGui)
-    local humanoid = character:WaitForChild("Humanoid", 10)
-    local rootPart = character:WaitForChild("HumanoidRootPart", 10)
-    
-    if not humanoid or not rootPart then return end
-
-    -- State tracking to prevent creating Tweens every single frame
-    local isMoving = false 
-    
-    -- Connection management
-    local heartbeatConnection
-    
-    heartbeatConnection = RunService.Heartbeat:Connect(function()
-        -- Cleanup check
-        if not character.Parent or not billboardGui.Parent then
-            heartbeatConnection:Disconnect()
-            return
-        end
-
-        -- Determine if moving based on Velocity magnitude
-        -- (More accurate than MoveDirection for network replication)
-        local velocity = rootPart.AssemblyLinearVelocity
-        local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-        local currentlyMoving = horizontalSpeed > 0.5 -- Threshold
-
-        -- Only trigger changes when the STATE changes
-        if currentlyMoving and not isMoving then
-            isMoving = true
-            -- Player started walking: Move Down and Fade Out slightly
-            tweenGuiTransparency(billboardGui, WALK_TRANSPARENCY, WALK_OFFSET)
-            
-        elseif not currentlyMoving and isMoving then
-            isMoving = false
-            -- Player stopped: Move Up and Fade In
-            tweenGuiTransparency(billboardGui, IDLE_TRANSPARENCY, IDLE_OFFSET)
+local chatToggleIcon = Icon.new()
+    :setName("Chat")
+	:setImage(16884178261, "Deselected")
+	:setImage(16086868447, "Selected")
+    :setLabel("Chat")
+    :bindEvent("selected", function()
+        local chatcontGui = getChatcontGui()
+        if chatcontGui then
+            chatcontGui.Enabled = not chatcontGui.Enabled
         end
     end)
-end
 
--- 5. Main Setup Function
-local function setupNameTag(player, character)
-    local head = character:WaitForChild("Head", 10)
-    if not head then return end
 
-    -- Cleanup existing tag if logic accidentally double-fires
-    if character:FindFirstChild("NameAndDescTag") then
-        character.NameAndDescTag:Destroy()
+playerGui.ChildAdded:Connect(function(child)
+    if child.Name == "Chatcont" then
+        child.Enabled = false
     end
+end)
 
-    -- Clone and Setup
-    local nameTag = nameTagTemplate:Clone()
-    nameTag.Name = "NameAndDescTag"
-    nameTag.CFrame = head.CFrame -- Start at head position
-    nameTag.Parent = character
-    
-    -- PHYSICS FIX: Use WeldConstraint to lock Part to Head
-    local weld = Instance.new("WeldConstraint")
-    weld.Part0 = nameTag
-    weld.Part1 = head
-    weld.Parent = nameTag
-    
-    nameTag.CanCollide = false
-    nameTag.Anchored = false
-    nameTag.Massless = true -- Ensure it doesn't weigh down the head
 
-    -- Configure the GUI
-    local billboardGui = nameTag:WaitForChild("BillboardGui", 5)
-    if billboardGui then
-        -- Set initial Offset (Idle)
-        billboardGui.StudsOffset = IDLE_OFFSET
-        
-        -- Update Name Text
-        local originalNameLabel = billboardGui:FindFirstChild("originalName")
-        if originalNameLabel then
-            originalNameLabel.Text = "@" .. player.Name
-        else
-            warn("Could not find 'originalName' TextLabel inside BillboardGui")
-        end
-        
-        -- Start monitoring
-        task.spawn(function()
-            monitorMovement(character, billboardGui)
-        end)
-    end
+local existingChatcont = getChatcontGui()
+if existingChatcont then
+    existingChatcont.Enabled = false
 end
 
--- 6. Player Added Handlers
-local function onPlayerAdded(player)
-    player.CharacterAdded:Connect(function(character)
-        -- Ensure physics exist before attaching
-        task.wait(0.5) 
-        setupNameTag(player, character)
-    end)
-
-    -- Handle case where character already exists (e.g. Play Solo)
-    if player.Character then
-        setupNameTag(player, player.Character)
-    end
+-- Wait a moment and then enable chat if it exists
+task.wait(1)
+local chatcontGui = getChatcontGui()
+if chatcontGui then
+    chatcontGui.Enabled = true
 end
-
-Players.PlayerAdded:Connect(onPlayerAdded)
-
--- Handle existing players (if script starts late)
-for _, player in ipairs(Players:GetPlayers()) do
-    onPlayerAdded(player)
-end
-
-print("NameTag System Loaded Successfully")
