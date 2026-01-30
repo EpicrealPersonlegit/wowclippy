@@ -7,25 +7,29 @@ local IDLE_OFFSET = Vector3.new(0, 2.5, 0)
 local WALK_OFFSET = Vector3.new(0, 1.5, 0)
 local IDLE_TRANSPARENCY = 0.3
 local WALK_TRANSPARENCY = 0.9
-local TWEEN_TIME = 0.4 -- Slightly faster feel
+local TWEEN_TIME = 0.4
 
-local NAME_TAG_TEMPLATE = ReplicatedStorage:WaitForChild("NameAndDescTag", 5)
+local TWEEN_INFO = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-local TWEEN_INFO = TweenInfo.new(
-	TWEEN_TIME,
-	Enum.EasingStyle.Quad,
-	Enum.EasingDirection.Out
-)
+-- Attempt to load the template safely
+local templateRef = ReplicatedStorage:WaitForChild("NameAndDescTag", 10)
 
--- 2. Helper to manage Tweens (Prevents memory bloat)
+if not templateRef then
+	warn("CRITICAL: 'NameAndDescTag' was not found in ReplicatedStorage after 10 seconds.")
+	-- Stop execution if template is missing to prevent hidden errors
+	return 
+end
+
+-- 2. Helper to manage Tweens
 local function applyState(billboardGui, isWalking)
+	-- Ensure the GUI is still valid before tweening
+	if not billboardGui or not billboardGui.Parent then return end
+
 	local targetTransparency = isWalking and WALK_TRANSPARENCY or IDLE_TRANSPARENCY
 	local targetOffset = isWalking and WALK_OFFSET or IDLE_OFFSET
 
-	-- Tween the BillboardGui itself
 	TweenService:Create(billboardGui, TWEEN_INFO, {StudsOffset = targetOffset}):Play()
 
-	-- Batch tween all text elements
 	for _, child in ipairs(billboardGui:GetDescendants()) do
 		if child:IsA("TextLabel") then
 			TweenService:Create(child, TWEEN_INFO, {
@@ -36,37 +40,67 @@ local function applyState(billboardGui, isWalking)
 	end
 end
 
--- 3. Setup Logic
+-- 3. Core Logic
 local function setupNameTag(player, character)
 	local head = character:WaitForChild("Head", 10)
 	local humanoid = character:WaitForChild("Humanoid", 10)
-	if not head or not humanoid then return end
 
-	-- Cleanup existing
-	local existing = head:FindFirstChild("NameAndDescTag")
-	if existing then existing:Destroy() end
-
-	-- Clone Template (Assuming Template is the BillboardGui itself now)
-	-- If your template is still a Part, change it to just the BillboardGui for efficiency.
-	local billboardGui = NAME_TAG_TEMPLATE:Clone()
-	billboardGui.Name = "NameAndDescTag"
-	billboardGui.Adornee = head
-	billboardGui.Parent = head
-	billboardGui.StudsOffset = IDLE_OFFSET
-
-	-- Set Name
-	local nameLabel = billboardGui:FindFirstChild("originalName", true) -- Recursive find
-	if nameLabel then
-		nameLabel.Text = "@" .. player.Name
+	if not head or not humanoid then 
+		warn("Character missing Head or Humanoid: " .. player.Name)
+		return 
 	end
 
-	-- EVENT-DRIVEN Movement Monitoring
+	-- Cleanup existing tag
+	if head:FindFirstChild("NameAndDescTag") then
+		head.NameAndDescTag:Destroy()
+	end
+
+	-- --- ASSET EXTRACTION LOGIC ---
+	-- This block fixes the issue where the script didn't know if it was cloning a Part or a GUI
+	local newItem = templateRef:Clone()
+	local distinctBillboardGui
+
+	if newItem:IsA("BillboardGui") then
+		-- You have optimized your asset to be just a GUI
+		distinctBillboardGui = newItem
+	elseif newItem:IsA("BasePart") then
+		-- You are using a Part containing the GUI (Old method)
+		-- We extract the GUI and throw away the physical part to save physics lag
+		distinctBillboardGui = newItem:FindFirstChildWhichIsA("BillboardGui")
+		if distinctBillboardGui then
+			distinctBillboardGui.Parent = nil -- Detach from Part
+		end
+		newItem:Destroy() -- Destroy the Part
+	end
+
+	if not distinctBillboardGui then
+		warn("CRITICAL: Could not find a BillboardGui inside the NameAndDescTag template.")
+		return
+	end
+	-- -----------------------------
+
+	-- Setup the GUI properties
+	distinctBillboardGui.Name = "NameAndDescTag"
+	distinctBillboardGui.Adornee = head -- Stick to head visually
+	distinctBillboardGui.Parent = head -- Parent to head logic
+	distinctBillboardGui.StudsOffset = IDLE_OFFSET
+	distinctBillboardGui.Enabled = true -- Force enable just in case
+
+	-- Update Name Text
+	-- Using recursive true allows the label to be inside frames/folders
+	local nameLabel = distinctBillboardGui:FindFirstChild("originalName", true) 
+	if nameLabel then
+		nameLabel.Text = "@" .. player.Name
+	else
+		warn("Warning: 'originalName' TextLabel not found in tag for " .. player.Name)
+	end
+
+	-- Event-Driven Movement
 	local isWalking = false
 	
-	-- Connection cleanup on character death/removal
 	local runningConnection
 	runningConnection = humanoid.Running:Connect(function(speed)
-		if not billboardGui or not billboardGui.Parent then
+		if not distinctBillboardGui or not distinctBillboardGui.Parent then
 			runningConnection:Disconnect()
 			return
 		end
@@ -74,23 +108,29 @@ local function setupNameTag(player, character)
 		local nowWalking = speed > 0.5
 		if nowWalking ~= isWalking then
 			isWalking = nowWalking
-			applyState(billboardGui, isWalking)
+			applyState(distinctBillboardGui, isWalking)
 		end
 	end)
+	
+	print("Tag successfully applied to: " .. player.Name)
 end
 
--- 4. Initialization
+-- 4. Initialization Handlers
 local function onPlayerAdded(player)
 	player.CharacterAdded:Connect(function(character)
+		-- Small wait to ensure character is fully assembled in world
+		task.wait(0.5) 
 		setupNameTag(player, character)
 	end)
 
 	if player.Character then
-		task.spawn(setupNameTag, player, player.Character)
+		setupNameTag(player, player.Character)
 	end
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
+
+-- Handle players already in game (Play Solo / Late Join)
 for _, player in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(player)
 end
