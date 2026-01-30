@@ -1,151 +1,96 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local ChatEvent = ReplicatedStorage:WaitForChild("SubmitChatMessage")
 
--- 1. Configuration / Constants
-local IDLE_OFFSET = Vector3.new(0, 2, 0) -- High up when standing
-local WALK_OFFSET = Vector3.new(0, 1.5, 0) -- Lower down when walking
+-- 1. Configuration
+local IDLE_OFFSET = Vector3.new(0, 2.5, 0)
+local WALK_OFFSET = Vector3.new(0, 1.5, 0)
 local IDLE_TRANSPARENCY = 0.3
 local WALK_TRANSPARENCY = 0.9
-local TWEEN_TIME = 0.5
+local TWEEN_TIME = 0.4 -- Slightly faster feel
 
-local nameTagTemplate = ReplicatedStorage:WaitForChild("NameAndDescTag", 5)
+local NAME_TAG_TEMPLATE = ReplicatedStorage:WaitForChild("NameAndDescTag", 5)
 
-if not nameTagTemplate then
-	warn("CRITICAL: NameAndDescTag not found in ReplicatedStorage!")
-	return
-end
-
--- 2. Tween Info
-local tweenInfo = TweenInfo.new(
+local TWEEN_INFO = TweenInfo.new(
 	TWEEN_TIME,
 	Enum.EasingStyle.Quad,
 	Enum.EasingDirection.Out
 )
 
--- 3. Helper Function to Tween Text Transparency
-local function tweenGuiTransparency(billboardGui, targetTransparency, targetOffset)
-	-- Tween the position of the GUI (StudsOffset)
-	TweenService:Create(billboardGui, tweenInfo, {StudsOffset = targetOffset}):Play()
+-- 2. Helper to manage Tweens (Prevents memory bloat)
+local function applyState(billboardGui, isWalking)
+	local targetTransparency = isWalking and WALK_TRANSPARENCY or IDLE_TRANSPARENCY
+	local targetOffset = isWalking and WALK_OFFSET or IDLE_OFFSET
 
-	-- Tween the transparency of all text labels inside
+	-- Tween the BillboardGui itself
+	TweenService:Create(billboardGui, TWEEN_INFO, {StudsOffset = targetOffset}):Play()
+
+	-- Batch tween all text elements
 	for _, child in ipairs(billboardGui:GetDescendants()) do
 		if child:IsA("TextLabel") then
-			TweenService:Create(child, tweenInfo, {TextTransparency = targetTransparency}):Play()
-			-- Optional: If you use TextStroke, tween that too
-			TweenService:Create(child, tweenInfo, {TextStrokeTransparency = targetTransparency == 1 and 1 or 0.8}):Play() 
+			TweenService:Create(child, TWEEN_INFO, {
+				TextTransparency = targetTransparency,
+				TextStrokeTransparency = (targetTransparency >= 0.9) and 1 or 0.8
+			}):Play()
 		end
 	end
 end
 
--- 4. Movement Monitor Logic
-local function monitorMovement(character, billboardGui)
+-- 3. Setup Logic
+local function setupNameTag(player, character)
+	local head = character:WaitForChild("Head", 10)
 	local humanoid = character:WaitForChild("Humanoid", 10)
-	local rootPart = character:WaitForChild("HumanoidRootPart", 10)
+	if not head or not humanoid then return end
 
-	if not humanoid or not rootPart then return end
+	-- Cleanup existing
+	local existing = head:FindFirstChild("NameAndDescTag")
+	if existing then existing:Destroy() end
 
-	-- State tracking to prevent creating Tweens every single frame
-	local isMoving = false 
+	-- Clone Template (Assuming Template is the BillboardGui itself now)
+	-- If your template is still a Part, change it to just the BillboardGui for efficiency.
+	local billboardGui = NAME_TAG_TEMPLATE:Clone()
+	billboardGui.Name = "NameAndDescTag"
+	billboardGui.Adornee = head
+	billboardGui.Parent = head
+	billboardGui.StudsOffset = IDLE_OFFSET
 
-	-- Connection management
-	local heartbeatConnection
+	-- Set Name
+	local nameLabel = billboardGui:FindFirstChild("originalName", true) -- Recursive find
+	if nameLabel then
+		nameLabel.Text = "@" .. player.Name
+	end
 
-	heartbeatConnection = RunService.Heartbeat:Connect(function()
-		-- Cleanup check
-		if not character.Parent or not billboardGui.Parent then
-			heartbeatConnection:Disconnect()
+	-- EVENT-DRIVEN Movement Monitoring
+	local isWalking = false
+	
+	-- Connection cleanup on character death/removal
+	local runningConnection
+	runningConnection = humanoid.Running:Connect(function(speed)
+		if not billboardGui or not billboardGui.Parent then
+			runningConnection:Disconnect()
 			return
 		end
 
-		-- Determine if moving based on Velocity magnitude
-		-- (More accurate than MoveDirection for network replication)
-		local velocity = rootPart.AssemblyLinearVelocity
-		local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-		local currentlyMoving = horizontalSpeed > 0.5 -- Threshold
-
-		-- Only trigger changes when the STATE changes
-		if currentlyMoving and not isMoving then
-			isMoving = true
-			-- Player started walking: Move Down and Fade Out slightly
-			tweenGuiTransparency(billboardGui, WALK_TRANSPARENCY, WALK_OFFSET)
-
-		elseif not currentlyMoving and isMoving then
-			isMoving = false
-			-- Player stopped: Move Up and Fade In
-			tweenGuiTransparency(billboardGui, IDLE_TRANSPARENCY, IDLE_OFFSET)
+		local nowWalking = speed > 0.5
+		if nowWalking ~= isWalking then
+			isWalking = nowWalking
+			applyState(billboardGui, isWalking)
 		end
 	end)
 end
 
--- 5. Main Setup Function
-local function setupNameTag(player, character)
-	local head = character:WaitForChild("Head", 10)
-	if not head then return end
-
-	-- Cleanup existing tag if logic accidentally double-fires
-	if character:FindFirstChild("NameAndDescTag") then
-		character.NameAndDescTag:Destroy()
-	end
-
-	-- Clone and Setup
-	local nameTag = nameTagTemplate:Clone()
-	nameTag.Name = "NameAndDescTag"
-	nameTag.CFrame = head.CFrame -- Start at head position
-	nameTag.Parent = character
-
-	-- PHYSICS FIX: Use WeldConstraint to lock Part to Head
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = nameTag
-	weld.Part1 = head
-	weld.Parent = nameTag
-
-	nameTag.CanCollide = false
-	nameTag.Anchored = false
-	nameTag.Massless = true -- Ensure it doesn't weigh down the head
-
-	-- Configure the GUI
-	local billboardGui = nameTag:WaitForChild("BillboardGui", 5)
-	if billboardGui then
-		-- Set initial Offset (Idle)
-		billboardGui.StudsOffset = IDLE_OFFSET
-
-		-- Update Name Text
-		local originalNameLabel = billboardGui:FindFirstChild("originalName")
-		if originalNameLabel then
-			originalNameLabel.Text = "@" .. player.Name
-		else
-			warn("Could not find 'originalName' TextLabel inside BillboardGui")
-		end
-
-		-- Start monitoring
-		task.spawn(function()
-			monitorMovement(character, billboardGui)
-		end)
-	end
-end
-
--- 6. Player Added Handlers
+-- 4. Initialization
 local function onPlayerAdded(player)
 	player.CharacterAdded:Connect(function(character)
-		-- Ensure physics exist before attaching
-		task.wait(0.5) 
 		setupNameTag(player, character)
 	end)
 
-	-- Handle case where character already exists (e.g. Play Solo)
 	if player.Character then
-		setupNameTag(player, player.Character)
+		task.spawn(setupNameTag, player, player.Character)
 	end
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
-
--- Handle existing players (if script starts late)
 for _, player in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(player)
 end
-
-print("NameTag System Loaded Successfully")
