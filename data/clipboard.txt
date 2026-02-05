@@ -13,120 +13,181 @@ local TWEEN_DIRECTION = Enum.EasingDirection.InOut
 -- Store original positions and tweens
 local originalPositions = {}
 local activeTweens = {}
+local connections = {} -- NEW: Store connections for cleanup
 
 -- Function to get original position of a GUI element
 local function getOriginalPosition(guiObject)
-	if not originalPositions[guiObject] then
-		originalPositions[guiObject] = guiObject.Position
-	end
-	return originalPositions[guiObject]
+    if not originalPositions[guiObject] then
+        originalPositions[guiObject] = guiObject.Position
+    end
+    return originalPositions[guiObject]
 end
 
 -- Function to create hover tween
 local function createHoverTween(guiObject, offset)
-	local originalPos = getOriginalPosition(guiObject)
-	local targetPos = UDim2.new(
-		originalPos.X.Scale,
-		originalPos.X.Offset,
-		originalPos.Y.Scale,
-		originalPos.Y.Offset - offset
-	)
-	
-	return TweenService:Create(
-		guiObject,
-		TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
-		{Position = targetPos}
-	)
+    local originalPos = getOriginalPosition(guiObject)
+    local targetPos = UDim2.new(
+        originalPos.X.Scale,
+        originalPos.X.Offset,
+        originalPos.Y.Scale,
+        originalPos.Y.Offset - offset
+    )
+    
+    return TweenService:Create(
+        guiObject,
+        TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
+        {Position = targetPos}
+    )
 end
 
 -- Function to animate element up
 local function animateUp(guiObject)
-	-- Cancel any existing tween for this object
-	if activeTweens[guiObject] then
-		activeTweens[guiObject]:Cancel()
-	end
-	
-	local tween = createHoverTween(guiObject, HOVER_OFFSET)
-	activeTweens[guiObject] = tween
-	tween:Play()
-	
-	-- Clean up when tween completes
-	tween.Completed:Connect(function()
-		if activeTweens[guiObject] == tween then
-			activeTweens[guiObject] = nil
-		end
-	end)
+    -- Cancel any existing tween for this object
+    if activeTweens[guiObject] then
+        activeTweens[guiObject]:Cancel()
+    end
+    
+    local tween = createHoverTween(guiObject, HOVER_OFFSET)
+    activeTweens[guiObject] = tween
+    tween:Play()
+    
+    -- FIXED: Use Once instead of Connect to prevent memory leak
+    tween.Completed:Once(function()
+        if activeTweens[guiObject] == tween then
+            activeTweens[guiObject] = nil
+        end
+    end)
 end
 
 -- Function to animate element back to original position
 local function animateDown(guiObject)
-	-- Cancel any existing tween for this object
-	if activeTweens[guiObject] then
-		activeTweens[guiObject]:Cancel()
-	end
-	
-	local originalPos = getOriginalPosition(guiObject)
-	local tween = TweenService:Create(
-		guiObject,
-		TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
-		{Position = originalPos}
-	)
-	activeTweens[guiObject] = tween
-	tween:Play()
-	
-	-- Clean up when tween completes
-	tween.Completed:Connect(function()
-		if activeTweens[guiObject] == tween then
-			activeTweens[guiObject] = nil
-		end
-	end)
+    -- Cancel any existing tween for this object
+    if activeTweens[guiObject] then
+        activeTweens[guiObject]:Cancel()
+    end
+    
+    local originalPos = getOriginalPosition(guiObject)
+    local tween = TweenService:Create(
+        guiObject,
+        TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
+        {Position = originalPos}
+    )
+    activeTweens[guiObject] = tween
+    tween:Play()
+    
+    -- FIXED: Use Once instead of Connect
+    tween.Completed:Once(function()
+        if activeTweens[guiObject] == tween then
+            activeTweens[guiObject] = nil
+        end
+    end)
 end
 
 -- Function to set up animations for a GUI element
 local function setupAnimations(guiObject)
-	-- Mouse enter/leave for hover effect
-	guiObject.MouseEnter:Connect(function()
-		animateUp(guiObject)
-	end)
-	
-	guiObject.MouseLeave:Connect(function()
-		animateDown(guiObject)
-	end)
-	
-	-- Focus/unfocus for TextBoxes
-	if guiObject:IsA("TextBox") then
-		guiObject.Focused:Connect(function()
-			animateUp(guiObject)
-		end)
-		
-		guiObject.FocusLost:Connect(function()
-			animateDown(guiObject)
-		end)
-	end
-	
-	-- Mouse down/up for buttons
-	if guiObject:IsA("TextButton") then
-		guiObject.MouseButton1Down:Connect(function()
-			animateUp(guiObject)
-		end)
-		
-		guiObject.MouseButton1Up:Connect(function()
-			animateDown(guiObject)
-		end)
-	end
+    -- Initialize connection table for this object
+    if not connections[guiObject] then
+        connections[guiObject] = {}
+    end
+    
+    -- FIXED: Only use hover for non-buttons, buttons get click animation
+    if guiObject:IsA("TextButton") then
+        -- For buttons: only animate on mouse down/up
+        table.insert(connections[guiObject], guiObject.MouseButton1Down:Connect(function()
+            animateUp(guiObject)
+        end))
+        
+        table.insert(connections[guiObject], guiObject.MouseButton1Up:Connect(function()
+            animateDown(guiObject)
+        end))
+        
+        -- Also animate down if mouse leaves while held
+        table.insert(connections[guiObject], guiObject.MouseLeave:Connect(function()
+            animateDown(guiObject)
+        end))
+        
+    elseif guiObject:IsA("TextBox") then
+        -- For TextBoxes: hover + focus
+        table.insert(connections[guiObject], guiObject.MouseEnter:Connect(function()
+            if not guiObject:IsFocused() then
+                animateUp(guiObject)
+            end
+        end))
+        
+        table.insert(connections[guiObject], guiObject.MouseLeave:Connect(function()
+            if not guiObject:IsFocused() then
+                animateDown(guiObject)
+            end
+        end))
+        
+        table.insert(connections[guiObject], guiObject.Focused:Connect(function()
+            animateUp(guiObject)
+        end))
+        
+        table.insert(connections[guiObject], guiObject.FocusLost:Connect(function()
+            animateDown(guiObject)
+        end))
+    else
+        -- For other elements: just hover
+        table.insert(connections[guiObject], guiObject.MouseEnter:Connect(function()
+            animateUp(guiObject)
+        end))
+        
+        table.insert(connections[guiObject], guiObject.MouseLeave:Connect(function()
+            animateDown(guiObject)
+        end))
+    end
+end
+
+-- Function to reset all animations
+local function resetAllAnimations()
+    -- Cancel all active tweens
+    for guiObject, tween in pairs(activeTweens) do
+        tween:Cancel()
+        -- Reset to original position immediately
+        guiObject.Position = getOriginalPosition(guiObject)
+    end
+    activeTweens = {}
+end
+
+-- NEW: Cleanup function
+local function cleanup()
+    resetAllAnimations()
+    
+    -- Disconnect all connections
+    for guiObject, conns in pairs(connections) do
+        for _, conn in ipairs(conns) do
+            conn:Disconnect()
+        end
+    end
+    connections = {}
 end
 
 -- Set up animations for all interactive elements
 local interactiveElements = {
-	frame:WaitForChild("deposit"),
-	frame:WaitForChild("withdraw"),
-	frame:WaitForChild("transfer"),
-	frame:WaitForChild("playername"),
-	frame:WaitForChild("amount")
+    frame:FindFirstChild("deposit"),
+    frame:FindFirstChild("withdraw"),
+    frame:FindFirstChild("transfer"),
+    frame:FindFirstChild("playername"),
+    frame:FindFirstChild("amount")
 }
 
 for _, element in ipairs(interactiveElements) do
-	if element then
-		setupAnimations(element)
-	end
+    if element then
+        setupAnimations(element)
+    else
+        warn("ATM Animation: Missing GUI element")
+    end
 end
+
+-- FIXED: Reset animations when GUI is disabled
+atmGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+    if not atmGui.Enabled then
+        resetAllAnimations()
+    end
+end)
+
+-- Cleanup on script destruction
+script.Destroying:Connect(function()
+    cleanup()
+end)
