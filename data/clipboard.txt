@@ -1,140 +1,132 @@
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local atmGui = script.Parent
+local frame = atmGui:WaitForChild("Frame")
 
--- Wait for GUIs to be cloned
-local moneyGui = playerGui:WaitForChild("money")
-local atmGui = playerGui:WaitForChild("atm")
-local moneyLabel = moneyGui:WaitForChild("TextLabel")
-local atmFrame = atmGui:WaitForChild("Frame")
+-- Animation settings
+local HOVER_OFFSET = 8
+local TWEEN_TIME = 0.2
+local TWEEN_EASING = Enum.EasingStyle.Quad
+local TWEEN_DIRECTION = Enum.EasingDirection.InOut
 
--- Get ATM elements
-local depositBtn = atmFrame:WaitForChild("deposit")
-local withdrawBtn = atmFrame:WaitForChild("withdraw")
-local transferBtn = atmFrame:WaitForChild("transfer")
-local amountBox = atmFrame:WaitForChild("amount")
-local playerNameBox = atmFrame:WaitForChild("playername")
+-- Store original positions and tweens
+local originalPositions = {}
+local activeTweens = {}
 
--- Get remote events
-local moneyRemote = ReplicatedStorage:WaitForChild("MoneyRemote")
-local bankRemote = ReplicatedStorage:WaitForChild("BankRemote")
-
--- Player data
-local playerMoney = 0
-local playerBank = 0
-
--- Function to format money display
-local function formatMoney(amount)
-    if amount >= 1000 then
-        return string.format("%.1fk", amount / 1000)
-    else
-        return tostring(amount)
-    end
+-- Function to get original position of a GUI element
+local function getOriginalPosition(guiObject)
+	if not originalPositions[guiObject] then
+		originalPositions[guiObject] = guiObject.Position
+	end
+	return originalPositions[guiObject]
 end
 
--- Function to update money display
-local function updateMoneyDisplay()
-    moneyLabel.Text = formatMoney(playerMoney) .. " CCRP"
+-- Function to create hover tween
+local function createHoverTween(guiObject, offset)
+	local originalPos = getOriginalPosition(guiObject)
+	local targetPos = UDim2.new(
+		originalPos.X.Scale,
+		originalPos.X.Offset,
+		originalPos.Y.Scale,
+		originalPos.Y.Offset - offset
+	)
+	
+	return TweenService:Create(
+		guiObject,
+		TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
+		{Position = targetPos}
+	)
 end
 
--- Function to show notification
-local function showNotification(message, isError)
-    StarterGui:SetCore("ChatMakeSystemMessage", {
-        Text = message;
-        Color = isError and Color3.new(1, 0.2, 0.2) or Color3.new(0.2, 1, 0.2);
-        Font = Enum.Font.SourceSansBold;
-        FontSize = Enum.FontSize.Size18;
-    })
+-- Function to animate element up
+local function animateUp(guiObject)
+	-- Cancel any existing tween for this object
+	if activeTweens[guiObject] then
+		activeTweens[guiObject]:Cancel()
+	end
+	
+	local tween = createHoverTween(guiObject, HOVER_OFFSET)
+	activeTweens[guiObject] = tween
+	tween:Play()
+	
+	-- Clean up when tween completes
+	tween.Completed:Connect(function()
+		if activeTweens[guiObject] == tween then
+			activeTweens[guiObject] = nil
+		end
+	end)
 end
 
--- Function to validate amount input
-local function getValidAmount()
-    local amount = tonumber(amountBox.Text)
-    if amount and amount > 0 and amount <= 1000000 then -- Reasonable limit
-        return amount
-    end
-    return nil
+-- Function to animate element back to original position
+local function animateDown(guiObject)
+	-- Cancel any existing tween for this object
+	if activeTweens[guiObject] then
+		activeTweens[guiObject]:Cancel()
+	end
+	
+	local originalPos = getOriginalPosition(guiObject)
+	local tween = TweenService:Create(
+		guiObject,
+		TweenInfo.new(TWEEN_TIME, TWEEN_EASING, TWEEN_DIRECTION),
+		{Position = originalPos}
+	)
+	activeTweens[guiObject] = tween
+	tween:Play()
+	
+	-- Clean up when tween completes
+	tween.Completed:Connect(function()
+		if activeTweens[guiObject] == tween then
+			activeTweens[guiObject] = nil
+		end
+	end)
 end
 
--- Function to validate player name
-local function getValidPlayerName()
-    local name = playerNameBox.Text:gsub("^%s*(.-)%s*$", "%1") -- Trim whitespace
-    if name and name ~= "" and #name <= 50 then
-        return name
-    end
-    return nil
+-- Function to set up animations for a GUI element
+local function setupAnimations(guiObject)
+	-- Mouse enter/leave for hover effect
+	guiObject.MouseEnter:Connect(function()
+		animateUp(guiObject)
+	end)
+	
+	guiObject.MouseLeave:Connect(function()
+		animateDown(guiObject)
+	end)
+	
+	-- Focus/unfocus for TextBoxes
+	if guiObject:IsA("TextBox") then
+		guiObject.Focused:Connect(function()
+			animateUp(guiObject)
+		end)
+		
+		guiObject.FocusLost:Connect(function()
+			animateDown(guiObject)
+		end)
+	end
+	
+	-- Mouse down/up for buttons
+	if guiObject:IsA("TextButton") then
+		guiObject.MouseButton1Down:Connect(function()
+			animateUp(guiObject)
+		end)
+		
+		guiObject.MouseButton1Up:Connect(function()
+			animateDown(guiObject)
+		end)
+	end
 end
 
--- Handle money remote events
-moneyRemote.OnClientEvent:Connect(function(action, value)
-    if action == "UpdateMoney" then
-        playerMoney = value
-        updateMoneyDisplay()
-    elseif action == "UpdateBank" then
-        playerBank = value
-    end
-end)
+-- Set up animations for all interactive elements
+local interactiveElements = {
+	frame:WaitForChild("deposit"),
+	frame:WaitForChild("withdraw"),
+	frame:WaitForChild("transfer"),
+	frame:WaitForChild("playername"),
+	frame:WaitForChild("amount")
+}
 
--- Handle bank remote events
-bankRemote.OnClientEvent:Connect(function(action, message)
-    if action == "Success" then
-        showNotification(message, false)
-        -- Clear input fields
-        amountBox.Text = ""
-        playerNameBox.Text = ""
-    elseif action == "Error" then
-        showNotification(message, true)
-    end
-end)
-
--- ATM button handlers
-depositBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    if amount then
-        bankRemote:FireServer("Deposit", amount)
-    else
-        showNotification("Please enter a valid amount!", true)
-    end
-end)
-
-withdrawBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    if amount then
-        bankRemote:FireServer("Withdraw", amount)
-    else
-        showNotification("Please enter a valid amount!", true)
-    end
-end)
-
-transferBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    local targetName = getValidPlayerName()
-    
-    if amount and targetName then
-        bankRemote:FireServer("Transfer", amount, targetName)
-    else
-        if not amount then
-            showNotification("Please enter a valid amount!", true)
-        else
-            showNotification("Please enter a valid player name!", true)
-        end
-    end
-end)
-
--- Request initial data
-moneyRemote:FireServer("GetMoney")
-moneyRemote:FireServer("GetBank")
-
--- Toggle ATM visibility with key (optional - press 'E' to toggle)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == Enum.KeyCode.E then
-        atmGui.Enabled = not atmGui.Enabled
-    end
-end)
-
--- Make sure ATM is initially disabled
-atmGui.Enabled = false
+for _, element in ipairs(interactiveElements) do
+	if element then
+		setupAnimations(element)
+	end
+end
