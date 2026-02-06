@@ -1,163 +1,244 @@
 local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
-local UserInputService = game:GetService("UserInputService")
 
-local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+-- Create RemoteEvents for communication
+local MoneyRemote = Instance.new("RemoteEvent")
+MoneyRemote.Name = "MoneyRemote"
+MoneyRemote.Parent = ReplicatedStorage
 
--- Wait for GUIs to be cloned
-local moneyGui = playerGui:WaitForChild("money")
-local atmGui = playerGui:WaitForChild("atm")
-local moneyLabel = moneyGui:WaitForChild("TextLabel")
-local atmFrame = atmGui:WaitForChild("Frame")
+local BankRemote = Instance.new("RemoteEvent")
+BankRemote.Name = "BankRemote"
+BankRemote.Parent = ReplicatedStorage
 
--- Get ATM elements
-local depositBtn = atmFrame:WaitForChild("deposit")
-local withdrawBtn = atmFrame:WaitForChild("withdraw")
-local transferBtn = atmFrame:WaitForChild("transfer")
-local amountBox = atmFrame:WaitForChild("amount")
-local playerNameBox = atmFrame:WaitForChild("playername")
+-- DataStore for player data
+local playerDataStore = DataStoreService:GetDataStore("PlayerMoneyData")
 
+-- Player data cache
+local playerData = {}
 
-
--- Get remote events
-local moneyRemote = ReplicatedStorage:WaitForChild("MoneyRemote")
-local bankRemote = ReplicatedStorage:WaitForChild("BankRemote")
-
--- Player data
-local playerMoney = 0
-local playerBank = 0
+-- Default starting money
+local STARTING_MONEY = 100
 
 -- Function to format money display
 local function formatMoney(amount)
-    if amount == nil or amount == 0 then
-        return "0"
-    elseif amount >= 1000 then
+    if amount >= 1000 then
         return string.format("%.1fk", amount / 1000)
     else
         return tostring(amount)
     end
 end
 
--- Function to update money display
-local function updateMoneyDisplay()
-    moneyLabel.Text = formatMoney(playerMoney) .. " CCRP"
-end
-
--- Function to show notification
-local function showNotification(message, isError)
-	pcall(function()
-    StarterGui:SetCore("ChatMakeSystemMessage", {
-        Text = message;
-        Color = isError and Color3.new(1, 0.2, 0.2) or Color3.new(0.2, 1, 0.2);
-        Font = Enum.Font.SourceSansBold;
-        FontSize = Enum.FontSize.Size18;
-	})
-	end)
-end
-
--- Function to validate amount input
-local function getValidAmount()
-    local amount = tonumber(amountBox.Text)
-    if amount and amount > 0 and amount <= 1000000 and amount == math.floor(amount) then -- Reasonable limit
-        return math.floor(amount) -- Ensure integer
-    end
-    return nil
-end
-
--- Function to validate player name
-local function getValidPlayerName()
-    local name = playerNameBox.Text:gsub("^%s*(.-)%s*$", "%1") -- Trim whitespace
-    if name and name ~= "" and #name <= 50 then
-        return name
-    end
-    return nil
-end
-
--- Handle money remote events
-moneyRemote.OnClientEvent:Connect(function(action, value)
-    print("MoneyRemote received: " .. action .. " with value: " .. tostring(value))
-    if action == "UpdateMoney" then
-        playerMoney = value
-        print("Updated playerMoney to: " .. playerMoney)
-        updateMoneyDisplay()
-    elseif action == "UpdateBank" then
-        playerBank = value
-        print("Updated playerBank to: " .. playerBank)
-    end
-end)
-
--- Handle bank remote events
-bankRemote.OnClientEvent:Connect(function(action, message)
-    if action == "Success" then
-        showNotification(message, false)
-        -- Clear input fields
-        amountBox.Text = ""
-        playerNameBox.Text = ""
-    elseif action == "Error" then
-        showNotification(message, true)
-    end
-end)
-
--- ATM button handlers
-depositBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    if amount then
-        bankRemote:FireServer("Deposit", amount)
-    else
-		showNotification("Please enter a valid amount!", true)	
-    end
-end)
-
-withdrawBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    if amount then
-        bankRemote:FireServer("Withdraw", amount)
-    else
-		showNotification("Please enter a valid amount!", true)
-    end
-end)
-
-transferBtn.MouseButton1Click:Connect(function()
-    local amount = getValidAmount()
-    local targetName = getValidPlayerName()
+-- Function to load player data
+local function loadPlayerData(player)
+    print("Loading data for player: " .. player.Name .. " (ID: " .. player.UserId .. ")")
+    local success, data = pcall(function()
+        return playerDataStore:GetAsync(tostring(player.UserId))
+    end)
     
-    if amount and targetName then
-        bankRemote:FireServer("Transfer", amount, targetName)
-    else
-        if not amount then
-			showNotification("Please enter a valid amount!", true)
+    if success then
+        if data then
+            print("Found existing data for " .. player.Name .. ": Money=" .. (data.money or 0) .. ", Bank=" .. (data.bank or 0))
+            playerData[player.UserId] = {
+                money = data.money or STARTING_MONEY,
+                bank = data.bank or 0
+            }
         else
-			showNotification("Please enter a valid player name!", true)
+            print("No existing data for " .. player.Name .. ", giving starting money: " .. STARTING_MONEY)
+            playerData[player.UserId] = {
+                money = STARTING_MONEY,
+                bank = 0
+            }
+            -- Save new player data
+            savePlayerData(player)
+        end
+    else
+        warn("Failed to load data for player " .. player.Name .. ": " .. tostring(data))
+        playerData[player.UserId] = {
+            money = STARTING_MONEY,
+            bank = 0
+        }
+    end
+    
+    print("Final data for " .. player.Name .. ": Money=" .. playerData[player.UserId].money .. ", Bank=" .. playerData[player.UserId].bank)
+    
+    -- Send initial data to client
+    MoneyRemote:FireClient(player, "UpdateMoney", playerData[player.UserId].money)
+    MoneyRemote:FireClient(player, "UpdateBank", playerData[player.UserId].bank)
+end
+
+-- Function to save player data
+local function savePlayerData(player)
+    local data = playerData[player.UserId]
+    if data then
+        local success, errorMessage = pcall(function()
+            playerDataStore:SetAsync(tostring(player.UserId), {
+                money = data.money,
+                bank = data.bank
+            })
+        end)
+        
+        if not success then
+            warn("Failed to save data for player " .. player.Name .. ": " .. tostring(errorMessage))
+        end
+    end
+end
+
+-- Function to get player money
+local function getPlayerMoney(player)
+    local data = playerData[player.UserId]
+    return data and data.money or 0
+end
+
+-- Function to get player bank balance
+local function getPlayerBank(player)
+    local data = playerData[player.UserId]
+    return data and data.bank or 0
+end
+
+-- Function to add money to player
+local function addMoney(player, amount)
+    local data = playerData[player.UserId]
+    if data then
+        data.money = data.money + amount
+        MoneyRemote:FireClient(player, "UpdateMoney", data.money)
+        -- Save immediately after money operation
+        savePlayerData(player)
+        return true
+    end
+    return false
+end
+
+-- Function to remove money from player
+local function removeMoney(player, amount)
+    local data = playerData[player.UserId]
+    if data and data.money >= amount then
+        data.money = data.money - amount
+        MoneyRemote:FireClient(player, "UpdateMoney", data.money)
+        -- Save immediately after money operation
+        savePlayerData(player)
+        return true
+    end
+    return false
+end
+
+-- Function to add money to bank
+local function addToBank(player, amount)
+    local data = playerData[player.UserId]
+    if data then
+        data.bank = data.bank + amount
+        MoneyRemote:FireClient(player, "UpdateBank", data.bank)
+        -- Save immediately after bank operation
+        savePlayerData(player)
+        return true
+    end
+    return false
+end
+
+-- Function to remove money from bank
+local function removeFromBank(player, amount)
+    local data = playerData[player.UserId]
+    if data and data.bank >= amount then
+        data.bank = data.bank - amount
+        MoneyRemote:FireClient(player, "UpdateBank", data.bank)
+        -- Save immediately after bank operation
+        savePlayerData(player)
+        return true
+    end
+    return false
+end
+
+-- Handle player joining
+Players.PlayerAdded:Connect(function(player)
+    -- Wait for character to load to ensure player is fully ready
+    player.CharacterAdded:Wait()
+    task.wait(1) -- Small delay to ensure everything is loaded
+    loadPlayerData(player)
+end)
+
+-- Handle player leaving
+Players.PlayerRemoving:Connect(function(player)
+    savePlayerData(player)
+    playerData[player.UserId] = nil
+end)
+
+-- Auto-save every 60 seconds
+task.spawn(function()
+    while true do
+        task.wait(60)
+        for _, player in Players:GetPlayers() do
+            savePlayerData(player)
         end
     end
 end)
 
--- Request initial data with retry mechanism
-local function requestInitialData()
-    print("Requesting initial money data...")
-    moneyRemote:FireServer("GetMoney")
-    moneyRemote:FireServer("GetBank")
-end
-
--- Wait for player to be fully loaded
-player.CharacterAdded:Wait()
-task.wait(1)
-
--- Request data immediately and retry if needed
-requestInitialData()
-task.wait(2)
-requestInitialData() -- Retry in case server wasn't ready
-task.wait(2)
-requestInitialData() -- Final retry
-
--- Toggle ATM visibility with key (optional - press 'E' to toggle)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == Enum.KeyCode.E then
-        atmGui.Enabled = not atmGui.Enabled
+-- Handle money remote events
+MoneyRemote.OnServerEvent:Connect(function(player, action, ...)
+    print("MoneyRemote received from " .. player.Name .. ": " .. action)
+    if action == "GetMoney" then
+        local money = getPlayerMoney(player)
+        print("Sending money to " .. player.Name .. ": " .. money)
+        MoneyRemote:FireClient(player, "UpdateMoney", money)
+    elseif action == "GetBank" then
+        local bank = getPlayerBank(player)
+        print("Sending bank to " .. player.Name .. ": " .. bank)
+        MoneyRemote:FireClient(player, "UpdateBank", bank)
     end
 end)
 
--- Make sure ATM is initially disabled
-atmGui.Enabled = false
+-- Handle bank remote events
+BankRemote.OnServerEvent:Connect(function(player, action, amount, targetPlayerName)
+    amount = tonumber(amount) or 0
+    
+    if action == "Deposit" then
+        if amount > 0 then
+            if removeMoney(player, amount) then
+                addToBank(player, amount)
+                BankRemote:FireClient(player, "Success", "Deposited " .. formatMoney(amount) .. " CCRP to bank")
+            else
+                BankRemote:FireClient(player, "Error", "Insufficient funds!")
+            end
+        else
+            BankRemote:FireClient(player, "Error", "Invalid amount!")
+        end
+        
+    elseif action == "Withdraw" then
+        if amount > 0 then
+            if removeFromBank(player, amount) then
+                addMoney(player, amount)
+                BankRemote:FireClient(player, "Success", "Withdrew " .. formatMoney(amount) .. " CCRP from bank")
+            else
+                BankRemote:FireClient(player, "Error", "Insufficient bank funds!")
+            end
+        else
+            BankRemote:FireClient(player, "Error", "Invalid amount!")
+        end
+        
+    elseif action == "Transfer" then
+        if amount > 0 and targetPlayerName and targetPlayerName ~= "" then
+            -- Find target player
+            local targetPlayer = Players:FindFirstChild(targetPlayerName)
+            if targetPlayer and targetPlayer ~= player then
+                if removeFromBank(player, amount) then
+                    addToBank(targetPlayer, amount)
+                    BankRemote:FireClient(player, "Success", "Transferred " .. formatMoney(amount) .. " CCRP to " .. targetPlayerName)
+                else
+                    BankRemote:FireClient(player, "Error", "Insufficient bank funds!")
+                end
+            elseif targetPlayer == player then
+                BankRemote:FireClient(player, "Error", "Cannot transfer to yourself!")
+            else
+                BankRemote:FireClient(player, "Error", "Player not found!")
+            end
+        else
+            BankRemote:FireClient(player, "Error", "Invalid amount or player name!")
+        end
+    end
+end)
+
+-- Save data when game shuts down
+game:BindToClose(function()
+    for _, player in Players:GetPlayers() do
+        savePlayerData(player)
+    end
+end)
