@@ -35,7 +35,7 @@ end
 -- Logic
 moneyRemote.OnClientEvent:Connect(function(action, val)
 	if action == "UpdateMoney" then
-		moneyLabel.Text = formatCurrency(val) .. " CCRP"
+		moneyLabel.Text = formatCurrency(val) .. "K CCRP"
 	end
 end)
 
