@@ -1,77 +1,139 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- UI References
-local atmGui = playerGui:WaitForChild("atm")
-local atmFrame = atmGui:WaitForChild("Frame")
-local moneyLabel = playerGui:WaitForChild("money"):WaitForChild("TextLabel")
+-- Wait for character to be fully loaded
+local character = player.Character or player.CharacterAdded:Wait()
 
-local amountBox = atmFrame:WaitForChild("amount")
-local playerNameBox = atmFrame:WaitForChild("playername")
+-- UI References with better loading
+local atmGui, atmFrame, moneyLabel, moneyTextLabel
+local depositBtn, withdrawBtn, transferBtn, amountBox, playerNameBox
+local moneyRemote, bankRemote
 
-local moneyRemote = ReplicatedStorage:WaitForChild("MoneyRemote")
-local bankRemote = ReplicatedStorage:WaitForChild("BankRemote")
+-- Function to safely get UI elements
+local function loadUIElements()
+	-- Wait for money GUI first (most important)
+	moneyLabel = playerGui:WaitForChild("money", 15)
+	if moneyLabel then
+		moneyTextLabel = moneyLabel:WaitForChild("TextLabel", 5)
+	end
+	
+	-- Wait for ATM GUI
+	atmGui = playerGui:WaitForChild("atm", 15)
+	if atmGui then
+		atmFrame = atmGui:WaitForChild("Frame", 5)
+		if atmFrame then
+			depositBtn = atmFrame:WaitForChild("deposit", 3)
+			withdrawBtn = atmFrame:WaitForChild("withdraw", 3)
+			transferBtn = atmFrame:WaitForChild("transfer", 3)
+			amountBox = atmFrame:WaitForChild("amount", 3)
+			playerNameBox = atmFrame:WaitForChild("playername", 3)
+		end
+	end
+	
+	-- Wait for remote events
+	moneyRemote = ReplicatedStorage:WaitForChild("MoneyRemote", 10)
+	bankRemote = ReplicatedStorage:WaitForChild("BankRemote", 10)
+end
+
+-- Load UI elements
+loadUIElements()
 
 -- Formatting
 local function formatCurrency(amount)
-    if amount >= 1000000 then
-        return string.format("%.1fM", amount / 1000000)
-    elseif amount >= 1000 then
-        return string.format("%.1fk", amount / 1000)
-    end
-    return tostring(amount)
+	return amount >= 1000 and string.format("%.1fk", amount / 1000) or tostring(amount)
 end
 
--- Safely send system messages
 local function showNotify(msg, isErr)
-    local success, err = pcall(function()
-        StarterGui:SetCore("ChatMakeSystemMessage", {
-            Text = "[BANK]: " .. msg,
-            Color = isErr and Color3.fromRGB(255, 75, 75) or Color3.fromRGB(75, 255, 75),
-            Font = Enum.Font.SourceSansBold
-        })
-    end)
+	StarterGui:SetCore("ChatMakeSystemMessage", {
+		Text = "[BANK]: " .. msg,
+		Color = isErr and Color3.new(1, 0.3, 0.3) or Color3.new(0.3, 1, 0.3),
+		Font = Enum.Font.SourceSansBold
+	})
 end
 
--- Consolidate button logic
-local function handleRequest(action)
-    local amt = tonumber(amountBox.Text:match("%d+")) -- Extract only digits
-    local target = playerNameBox.Text
-    
-    if not amt or amt <= 0 then
-        return showNotify("Please enter a valid positive number!", true)
-    end
-    
-    if action == "Transfer" then
-        if #target < 2 then
-            return showNotify("Please enter a valid player name!", true)
-        end
-        bankRemote:FireServer("Transfer", amt, target)
-    else
-        bankRemote:FireServer(action, amt)
-    end
+-- Logic
+local function setupMoneyUpdate()
+	if moneyRemote and moneyTextLabel then
+		-- Request initial money update
+		moneyRemote:FireServer("RequestMoney")
+		
+		moneyRemote.OnClientEvent:Connect(function(action, val)
+			if action == "UpdateMoney" and moneyTextLabel then
+				moneyTextLabel.Text = formatCurrency(val) .. "K CCRP"
+			end
+		end)
+	end
 end
 
--- Logic Connections
-moneyRemote.OnClientEvent:Connect(function(action, val)
-    if action == "UpdateMoney" then
-        moneyLabel.Text = formatCurrency(val) .. " CCRP"
-    end
-end)
+-- Set up money update with retry mechanism
+local function setupWithRetry(maxRetries)
+	maxRetries = maxRetries or 3
+	
+	for i = 1, maxRetries do
+		if moneyRemote and moneyTextLabel then
+			setupMoneyUpdate()
+			return true
+		else
+			-- Reload UI elements if missing
+			loadUIElements()
+			if i < maxRetries then
+				task.wait(1)
+			end
+		end
+	end
+	
+	warn("Failed to set up money update after " .. maxRetries .. " retries")
+	return false
+end
 
-bankRemote.OnClientEvent:Connect(function(action, msg)
-    showNotify(msg, action == "Error")
-    if action == "Success" then
-        amountBox.Text = ""
-        playerNameBox.Text = ""
-    end
-end)
+-- Initial setup
+setupWithRetry(3)
 
--- Event Bindings
-atmFrame:WaitForChild("deposit").Activated:Connect(function() handleRequest("Deposit") end)
-atmFrame:WaitForChild("withdraw").Activated:Connect(function() handleRequest("Withdraw") end)
-atmFrame:WaitForChild("transfer").Activated:Connect(function() handleRequest("Transfer") end)
+if bankRemote then
+	bankRemote.OnClientEvent:Connect(function(action, msg)
+		showNotify(msg, action == "Error")
+		if action == "Success" and amountBox and playerNameBox then
+			amountBox.Text = ""
+			playerNameBox.Text = ""
+		end
+	end)
+end
+
+if depositBtn and amountBox then
+	depositBtn.MouseButton1Click:Connect(function()
+		local amt = tonumber(amountBox.Text)
+		if amt and amt > 0 then
+			bankRemote:FireServer("Deposit", amt)
+		else
+			showNotify("Enter a valid amount!", true)
+		end
+	end)
+end
+
+if withdrawBtn and amountBox then
+	withdrawBtn.MouseButton1Click:Connect(function()
+		local amt = tonumber(amountBox.Text)
+		if amt and amt > 0 then
+			bankRemote:FireServer("Withdraw", amt)
+		else
+			showNotify("Enter a valid amount!", true)
+		end
+	end)
+end
+
+if transferBtn and amountBox and playerNameBox then
+	transferBtn.MouseButton1Click:Connect(function()
+		local amt = tonumber(amountBox.Text)
+		local target = playerNameBox.Text
+		if amt and amt > 0 and #target > 0 then
+			bankRemote:FireServer("Transfer", amt, target)
+		else
+			showNotify("Fill in amount and player name!", true)
+		end
+	end)
+end
