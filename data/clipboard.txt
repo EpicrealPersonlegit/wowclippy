@@ -1,80 +1,128 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local player = Players.LocalPlayer
-local gui = script.Parent
-local mainFrame = gui:WaitForChild("MainFrame")
+--// MODULES
+local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"))
 
-local scrollFrame = mainFrame:WaitForChild("PlayerList")
-local selectedLabel = mainFrame:WaitForChild("SelectedLabel")
-local amountBox = mainFrame:WaitForChild("AmountBox")
-local giveButton = mainFrame:WaitForChild("GiveButton")
+--// CONFIGURATION
+local DATA_VERSION = "PlayerMoneyData_v3" 
+local STARTING_MONEY = 100
+local MAX_TRANSACTION = 1000000
 
-local AdminRemote = ReplicatedStorage:WaitForChild("AdminMoneyRemote")
+local ProfileTemplate = {
+	Money = STARTING_MONEY, -- Cash on hand
+	Bank = 0,               -- Money in ATM
+}
 
-local currentlySelectedPlayer = nil
+local ProfileStore = ProfileService.GetProfileStore(DATA_VERSION, ProfileTemplate)
+local Profiles = {} 
 
---// FUNCTION: Refresh the Player List
-local function updatePlayerList()
-	-- Clear existing buttons
-	for _, child in pairs(scrollFrame:GetChildren()) do
-		if child:IsA("TextButton") then child:Destroy() end
-	end
+--// REMOTES
+local MoneyRemote = ReplicatedStorage:FindFirstChild("MoneyRemote") or Instance.new("RemoteEvent")
+MoneyRemote.Name = "MoneyRemote"
+MoneyRemote.Parent = ReplicatedStorage
 
-	-- Create new buttons for each player
-	for _, p in pairs(Players:GetPlayers()) do
-		local btn = Instance.new("TextButton")
-		btn.Name = p.Name
-		btn.Text = p.Name
-		btn.Size = UDim2.new(1, 0, 0, 30)
-		btn.Parent = scrollFrame
-		
-		-- When you click a name in the list
-		btn.MouseButton1Click:Connect(function()
-			currentlySelectedPlayer = p.Name
-			selectedLabel.Text = "Fetching data..."
-			-- Ask server for this player's stats
-			AdminRemote:FireServer("GetInfo", p.Name)
-		end)
+local BankRemote = ReplicatedStorage:FindFirstChild("BankRemote") or Instance.new("RemoteEvent")
+BankRemote.Name = "BankRemote"
+BankRemote.Parent = ReplicatedStorage
+
+--// HELPER: Update Client UI
+local function syncStats(player)
+	local profile = Profiles[player]
+	if profile then
+		-- Update HUD (Cash)
+		MoneyRemote:FireClient(player, "UpdateMoney", profile.Data.Money)
+		-- Update ATM Display (Bank)
+		MoneyRemote:FireClient(player, "UpdateBank", profile.Data.Bank)
 	end
 end
 
---// LISTENERS
--- 1. Refresh list when players join/leave
-Players.PlayerAdded:Connect(updatePlayerList)
-Players.PlayerRemoving:Connect(updatePlayerList)
-updatePlayerList() -- Run once at start
-
--- 2. Handle Server Responses
-AdminRemote.OnClientEvent:Connect(function(action, arg1, arg2)
-	if action == "UpdateInfo" then
-		-- arg1 = Name, arg2 = Money
-		local name = arg1
-		local money = arg2
-		if currentlySelectedPlayer == name then
-			selectedLabel.Text = "Player: " .. name .. " | Cash: $" .. money
+--// DATA LOADING
+local function PlayerAdded(player)
+	local profile = ProfileStore:LoadProfileAsync("Player_" .. player.UserId)
+	if profile ~= nil then
+		profile:AddUserId(player.UserId)
+		profile:Reconcile()
+		profile:ListenToRelease(function()
+			Profiles[player] = nil
+			player:Kick("Data session ended.")
+		end)
+		if player:IsDescendantOf(Players) then
+			Profiles[player] = profile
+			syncStats(player)
+		else
+			profile:Release()
 		end
-		
-	elseif action == "Success" then
-		-- Optional: Make the button green for a second
-		giveButton.Text = "Success!"
-		task.wait(1)
-		giveButton.Text = "Give Money"
+	else
+		player:Kick("Data failed to load.")
 	end
-end)
+end
 
--- 3. Give Button Logic
-giveButton.MouseButton1Click:Connect(function()
-	if not currentlySelectedPlayer then
-		selectedLabel.Text = "Select a player first!"
+--// BANK LOGIC
+BankRemote.OnServerEvent:Connect(function(player, action, amount, targetName)
+	local profile = Profiles[player]
+	if not profile then return end
+	
+	amount = tonumber(amount)
+	if not amount or amount <= 0 or amount > MAX_TRANSACTION or amount % 1 ~= 0 then
+		BankRemote:FireClient(player, "Error", "Invalid amount!")
 		return
 	end
-	
-	local amount = tonumber(amountBox.Text)
-	if amount then
-		-- Fire the server to give money
-		AdminRemote:FireServer("GiveMoney", currentlySelectedPlayer, amount)
-	else
-		amountBox.Text = "Invalid Num"
+
+	if action == "Deposit" then
+		if profile.Data.Money >= amount then
+			profile.Data.Money -= amount
+			profile.Data.Bank += amount
+			syncStats(player)
+			BankRemote:FireClient(player, "Success", "Deposited $" .. amount)
+		else
+			BankRemote:FireClient(player, "Error", "Not enough cash!")
+		end
+
+	elseif action == "Withdraw" then
+		if profile.Data.Bank >= amount then
+			profile.Data.Bank -= amount
+			profile.Data.Money += amount
+			syncStats(player)
+			BankRemote:FireClient(player, "Success", "Withdrew $" .. amount)
+		else
+			BankRemote:FireClient(player, "Error", "Not enough in bank!")
+		end
+
+	elseif action == "Transfer" then
+		local target = Players:FindFirstChild(targetName)
+		if target and target ~= player then
+			local targetProfile = Profiles[target]
+			if targetProfile then
+				if profile.Data.Bank >= amount then
+					-- Subtract from sender
+					profile.Data.Bank -= amount
+					-- Add to receiver
+					targetProfile.Data.Bank += amount
+					
+					-- Update both players
+					syncStats(player)
+					syncStats(target)
+					
+					BankRemote:FireClient(player, "Success", "Sent $"..amount.." to "..target.Name)
+					BankRemote:FireClient(target, "Success", "Received $"..amount.." from "..player.Name)
+				else
+					BankRemote:FireClient(player, "Error", "Insufficient bank funds!")
+				end
+			else
+				BankRemote:FireClient(player, "Error", "Target's data not loaded.")
+			end
+		else
+			BankRemote:FireClient(player, "Error", "Player not found or invalid.")
+		end
 	end
 end)
+
+--// INIT
+Players.PlayerAdded:Connect(PlayerAdded)
+Players.PlayerRemoving:Connect(function(player)
+	local profile = Profiles[player]
+	if profile then profile:Release() end
+end)
+for _, p in ipairs(Players:GetPlayers()) do task.spawn(PlayerAdded, p) end
