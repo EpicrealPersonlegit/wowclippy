@@ -1,156 +1,80 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 
---// MODULES
--- Make sure ProfileService is inside ServerScriptService
-local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"))
+local player = Players.LocalPlayer
+local gui = script.Parent
+local mainFrame = gui:WaitForChild("MainFrame")
 
---// CONFIGURATION
-local DATA_VERSION = "PlayerMoneyData_v2" -- Changed name to start fresh data for ProfileService
-local STARTING_MONEY = 100
-local MAX_TRANSACTION = 1000000 -- Security cap
+local scrollFrame = mainFrame:WaitForChild("PlayerList")
+local selectedLabel = mainFrame:WaitForChild("SelectedLabel")
+local amountBox = mainFrame:WaitForChild("AmountBox")
+local giveButton = mainFrame:WaitForChild("GiveButton")
 
---// PROFILE TEMPLATE
--- This is the default data for new players
-local ProfileTemplate = {
-	Money = STARTING_MONEY,
-	Bank = 0,
-	-- Add other data here (e.g., XP = 0, Level = 1)
-}
+local AdminRemote = ReplicatedStorage:WaitForChild("AdminMoneyRemote")
 
-local ProfileStore = ProfileService.GetProfileStore(DATA_VERSION, ProfileTemplate)
-local Profiles = {} -- Cache to store active profiles
+local currentlySelectedPlayer = nil
 
---// REMOTES
--- Ensure these exist in ReplicatedStorage
-local MoneyRemote = ReplicatedStorage:FindFirstChild("MoneyRemote") or Instance.new("RemoteEvent")
-MoneyRemote.Name = "MoneyRemote"
-MoneyRemote.Parent = ReplicatedStorage
+--// FUNCTION: Refresh the Player List
+local function updatePlayerList()
+	-- Clear existing buttons
+	for _, child in pairs(scrollFrame:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
 
-local BankRemote = ReplicatedStorage:FindFirstChild("BankRemote") or Instance.new("RemoteEvent")
-BankRemote.Name = "BankRemote"
-BankRemote.Parent = ReplicatedStorage
-
---// HELPER: Player Added (Load Data)
-local function PlayerAdded(player)
-	local profile = ProfileStore:LoadProfileAsync("Player_" .. player.UserId)
-	
-	if profile ~= nil then
-		profile:AddUserId(player.UserId) -- GDPR compliance
-		profile:Reconcile() -- Fills in missing values from Template
+	-- Create new buttons for each player
+	for _, p in pairs(Players:GetPlayers()) do
+		local btn = Instance.new("TextButton")
+		btn.Name = p.Name
+		btn.Text = p.Name
+		btn.Size = UDim2.new(1, 0, 0, 30)
+		btn.Parent = scrollFrame
 		
-		-- Handle session locking (if another server loads this profile, kick this player)
-		profile:ListenToRelease(function()
-			Profiles[player] = nil
-			player:Kick("Profile loaded in another server. Please rejoin.")
+		-- When you click a name in the list
+		btn.MouseButton1Click:Connect(function()
+			currentlySelectedPlayer = p.Name
+			selectedLabel.Text = "Fetching data..."
+			-- Ask server for this player's stats
+			AdminRemote:FireServer("GetInfo", p.Name)
 		end)
-		
-		if player:IsDescendantOf(Players) then
-			Profiles[player] = profile
-			
-			-- Initial Data Sync to Client
-			MoneyRemote:FireClient(player, "UpdateMoney", profile.Data.Money)
-			-- If you have a separate Bank UI updater:
-			-- MoneyRemote:FireClient(player, "UpdateBank", profile.Data.Bank)
-			print(player.Name .. "'s data loaded.")
-		else
-			-- Player left before data loaded
-			profile:Release()
+	end
+end
+
+--// LISTENERS
+-- 1. Refresh list when players join/leave
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+updatePlayerList() -- Run once at start
+
+-- 2. Handle Server Responses
+AdminRemote.OnClientEvent:Connect(function(action, arg1, arg2)
+	if action == "UpdateInfo" then
+		-- arg1 = Name, arg2 = Money
+		local name = arg1
+		local money = arg2
+		if currentlySelectedPlayer == name then
+			selectedLabel.Text = "Player: " .. name .. " | Cash: $" .. money
 		end
-	else
-		-- Data failed to load (Roblox down?)
-		player:Kick("Data could not be loaded. Please rejoin.")
+		
+	elseif action == "Success" then
+		-- Optional: Make the button green for a second
+		giveButton.Text = "Success!"
+		task.wait(1)
+		giveButton.Text = "Give Money"
 	end
-end
+end)
 
---// HELPER: Player Removing (Release Data)
-local function PlayerRemoving(player)
-	local profile = Profiles[player]
-	if profile then
-		profile:Release()
-	end
-end
-
---// INIT PLAYERS
-for _, player in ipairs(Players:GetPlayers()) do
-	task.spawn(PlayerAdded, player)
-end
-
-Players.PlayerAdded:Connect(PlayerAdded)
-Players.PlayerRemoving:Connect(PlayerRemoving)
-
---// BANK LOGIC
-BankRemote.OnServerEvent:Connect(function(player, action, amount, targetName)
-	local profile = Profiles[player]
-	
-	-- 1. Security Check: Does player have data loaded?
-	if not profile then return end
-	
-	local data = profile.Data -- Shortcut variable
-	
-	-- 2. Input Validation
-	amount = tonumber(amount)
-	if not amount or amount <= 0 or amount > MAX_TRANSACTION or amount % 1 ~= 0 then
-		BankRemote:FireClient(player, "Error", "Invalid Amount!")
+-- 3. Give Button Logic
+giveButton.MouseButton1Click:Connect(function()
+	if not currentlySelectedPlayer then
+		selectedLabel.Text = "Select a player first!"
 		return
 	end
-
-	-- 3. Deposit Logic
-	if action == "Deposit" then
-		if data.Money >= amount then
-			data.Money -= amount
-			data.Bank += amount
-			
-			-- Update Client
-			MoneyRemote:FireClient(player, "UpdateMoney", data.Money)
-			BankRemote:FireClient(player, "Success", "Deposited $" .. amount)
-		else
-			BankRemote:FireClient(player, "Error", "Not enough cash!")
-		end
-
-	-- 4. Withdraw Logic
-	elseif action == "Withdraw" then
-		if data.Bank >= amount then
-			data.Bank -= amount
-			data.Money += amount
-			
-			-- Update Client
-			MoneyRemote:FireClient(player, "UpdateMoney", data.Money)
-			BankRemote:FireClient(player, "Success", "Withdrew $" .. amount)
-		else
-			BankRemote:FireClient(player, "Error", "Not enough in bank!")
-		end
-
-	-- 5. Transfer Logic
-	elseif action == "Transfer" then
-		-- Find target player
-		local target = Players:FindFirstChild(targetName)
-		
-		-- Check if target exists, isn't the sender, and HAS A LOADED PROFILE
-		if target and target ~= player then
-			local targetProfile = Profiles[target]
-			
-			if targetProfile then
-				if data.Bank >= amount then
-					-- Transaction
-					data.Bank -= amount
-					targetProfile.Data.Bank += amount
-					
-					-- Notify Sender
-					BankRemote:FireClient(player, "Success", "Sent $"..amount.." to " .. target.Name)
-					
-					-- Notify Receiver (Optional: Update their bank UI if open)
-					MoneyRemote:FireClient(target, "UpdateMoney", targetProfile.Data.Money)
-					BankRemote:FireClient(target, "Success", "Received $"..amount.." from " .. player.Name)
-				else
-					BankRemote:FireClient(player, "Error", "Insufficient bank funds!")
-				end
-			else
-				BankRemote:FireClient(player, "Error", "Target player's data is not loaded yet.")
-			end
-		else
-			BankRemote:FireClient(player, "Error", "Player not found!")
-		end
+	
+	local amount = tonumber(amountBox.Text)
+	if amount then
+		-- Fire the server to give money
+		AdminRemote:FireServer("GiveMoney", currentlySelectedPlayer, amount)
+	else
+		amountBox.Text = "Invalid Num"
 	end
 end)
