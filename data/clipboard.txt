@@ -1,128 +1,75 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
+local StarterGui = game:GetService("StarterGui")
 
---// MODULES
-local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"))
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
---// CONFIGURATION
-local DATA_VERSION = "PlayerMoneyData_v3" 
-local STARTING_MONEY = 100
-local MAX_TRANSACTION = 1000000
+-- Remotes
+local moneyRemote = ReplicatedStorage:WaitForChild("MoneyRemote")
+local bankRemote = ReplicatedStorage:WaitForChild("BankRemote")
 
-local ProfileTemplate = {
-	Money = STARTING_MONEY, -- Cash on hand
-	Bank = 0,               -- Money in ATM
-}
+-- UI References (Adjust names if they differ in your Explorer)
+local moneyLabel = playerGui:WaitForChild("money"):WaitForChild("TextLabel")
+local atmFrame = playerGui:WaitForChild("atm"):WaitForChild("Frame")
 
-local ProfileStore = ProfileService.GetProfileStore(DATA_VERSION, ProfileTemplate)
-local Profiles = {} 
+local depositBtn = atmFrame:WaitForChild("deposit")
+local withdrawBtn = atmFrame:WaitForChild("withdraw")
+local transferBtn = atmFrame:WaitForChild("transfer")
+local amountBox = atmFrame:WaitForChild("amount")
+local playerNameBox = atmFrame:WaitForChild("playername")
+local bankDisplay = atmFrame:FindFirstChild("bankBalance") -- Optional: If you have a label inside ATM showing bank balance
 
---// REMOTES
-local MoneyRemote = ReplicatedStorage:FindFirstChild("MoneyRemote") or Instance.new("RemoteEvent")
-MoneyRemote.Name = "MoneyRemote"
-MoneyRemote.Parent = ReplicatedStorage
-
-local BankRemote = ReplicatedStorage:FindFirstChild("BankRemote") or Instance.new("RemoteEvent")
-BankRemote.Name = "BankRemote"
-BankRemote.Parent = ReplicatedStorage
-
---// HELPER: Update Client UI
-local function syncStats(player)
-	local profile = Profiles[player]
-	if profile then
-		-- Update HUD (Cash)
-		MoneyRemote:FireClient(player, "UpdateMoney", profile.Data.Money)
-		-- Update ATM Display (Bank)
-		MoneyRemote:FireClient(player, "UpdateBank", profile.Data.Bank)
-	end
+-- Formatting
+local function formatCurrency(amount)
+	return amount >= 1000 and string.format("%.1fk", amount / 1000) or tostring(amount)
 end
 
---// DATA LOADING
-local function PlayerAdded(player)
-	local profile = ProfileStore:LoadProfileAsync("Player_" .. player.UserId)
-	if profile ~= nil then
-		profile:AddUserId(player.UserId)
-		profile:Reconcile()
-		profile:ListenToRelease(function()
-			Profiles[player] = nil
-			player:Kick("Data session ended.")
-		end)
-		if player:IsDescendantOf(Players) then
-			Profiles[player] = profile
-			syncStats(player)
-		else
-			profile:Release()
-		end
+local function showNotify(msg, isErr)
+	StarterGui:SetCore("ChatMakeSystemMessage", {
+		Text = "[BANK]: " .. msg,
+		Color = isErr and Color3.new(1, 0.3, 0.3) or Color3.new(0.3, 1, 0.3),
+		Font = Enum.Font.SourceSansBold
+	})
+end
+
+-- Update Listeners
+moneyRemote.OnClientEvent:Connect(function(action, val)
+	if action == "UpdateMoney" then
+		moneyLabel.Text = formatCurrency(val) .. " CCRP"
+	elseif action == "UpdateBank" and bankDisplay then
+		bankDisplay.Text = "Bank: $" .. val
+	end
+end)
+
+bankRemote.OnClientEvent:Connect(function(action, msg)
+	showNotify(msg, action == "Error")
+	if action == "Success" then
+		amountBox.Text = ""
+		playerNameBox.Text = ""
+	end
+end)
+
+-- Button Logic
+depositBtn.MouseButton1Click:Connect(function()
+	local amt = tonumber(amountBox.Text)
+	if amt then bankRemote:FireServer("Deposit", amt) end
+end)
+
+withdrawBtn.MouseButton1Click:Connect(function()
+	local amt = tonumber(amountBox.Text)
+	if amt then bankRemote:FireServer("Withdraw", amt) end
+end)
+
+transferBtn.MouseButton1Click:Connect(function()
+	local amt = tonumber(amountBox.Text)
+	local target = playerNameBox.Text
+	if amt and #target > 0 then
+		bankRemote:FireServer("Transfer", amt, target)
 	else
-		player:Kick("Data failed to load.")
-	end
-end
-
---// BANK LOGIC
-BankRemote.OnServerEvent:Connect(function(player, action, amount, targetName)
-	local profile = Profiles[player]
-	if not profile then return end
-	
-	amount = tonumber(amount)
-	if not amount or amount <= 0 or amount > MAX_TRANSACTION or amount % 1 ~= 0 then
-		BankRemote:FireClient(player, "Error", "Invalid amount!")
-		return
-	end
-
-	if action == "Deposit" then
-		if profile.Data.Money >= amount then
-			profile.Data.Money -= amount
-			profile.Data.Bank += amount
-			syncStats(player)
-			BankRemote:FireClient(player, "Success", "Deposited $" .. amount)
-		else
-			BankRemote:FireClient(player, "Error", "Not enough cash!")
-		end
-
-	elseif action == "Withdraw" then
-		if profile.Data.Bank >= amount then
-			profile.Data.Bank -= amount
-			profile.Data.Money += amount
-			syncStats(player)
-			BankRemote:FireClient(player, "Success", "Withdrew $" .. amount)
-		else
-			BankRemote:FireClient(player, "Error", "Not enough in bank!")
-		end
-
-	elseif action == "Transfer" then
-		local target = Players:FindFirstChild(targetName)
-		if target and target ~= player then
-			local targetProfile = Profiles[target]
-			if targetProfile then
-				if profile.Data.Bank >= amount then
-					-- Subtract from sender
-					profile.Data.Bank -= amount
-					-- Add to receiver
-					targetProfile.Data.Bank += amount
-					
-					-- Update both players
-					syncStats(player)
-					syncStats(target)
-					
-					BankRemote:FireClient(player, "Success", "Sent $"..amount.." to "..target.Name)
-					BankRemote:FireClient(target, "Success", "Received $"..amount.." from "..player.Name)
-				else
-					BankRemote:FireClient(player, "Error", "Insufficient bank funds!")
-				end
-			else
-				BankRemote:FireClient(player, "Error", "Target's data not loaded.")
-			end
-		else
-			BankRemote:FireClient(player, "Error", "Player not found or invalid.")
-		end
+		showNotify("Enter amount and player name!", true)
 	end
 end)
 
---// INIT
-Players.PlayerAdded:Connect(PlayerAdded)
-Players.PlayerRemoving:Connect(function(player)
-	local profile = Profiles[player]
-	if profile then profile:Release() end
-end)
-for _, p in ipairs(Players:GetPlayers()) do task.spawn(PlayerAdded, p) end
+-- Initial Request
+moneyRemote:FireServer("RequestMoney")
